@@ -30,7 +30,7 @@ jobs:
         run: |
           docker build -t sumy-alarm-map:smoke .
           docker run -d --name airalarm-smoke --read-only --cap-drop ALL --security-opt no-new-privileges -p 127.0.0.1:18765:8765 sumy-alarm-map:smoke
-          curl --fail --retry 10 --retry-connrefused --retry-delay 1 http://127.0.0.1:18765/ --output /dev/null
+          curl --fail --retry 10 --retry-all-errors --retry-delay 1 http://127.0.0.1:18765/ --output /dev/null
           test "$(docker exec airalarm-smoke id -u)" = "65532"
           python3 - <<'PY'
           import json, urllib.request, urllib.error
@@ -46,7 +46,11 @@ jobs:
               else:
                   raise AssertionError('Private path is exposed: ' + path)
           PY
-          docker rm -f airalarm-smoke
+      - name: Container logs and cleanup
+        if: always()
+        run: |
+          docker logs airalarm-smoke || true
+          docker rm -f airalarm-smoke || true
       - name: Set up Buildx
         uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - name: Log in to GHCR
