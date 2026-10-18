@@ -1,0 +1,11 @@
+analysis/
+RESEARCH.md
+*.apks
+*.apk
+*.dex
+.DS_Store
+.env
+.env.*
+!.env.example
+__pycache__/
+*.log

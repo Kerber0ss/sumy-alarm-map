@@ -1,0 +1,240 @@
+{
+  "stateName": "Сумська область",
+  "stateId": 20,
+  "districts": [
+    {
+      "districtName": "Роменський район",
+      "districtId": 116,
+      "communities": [
+        {
+          "communityName": "Андріяшівська територіальна громада",
+          "communityId": 1166
+        },
+        {
+          "communityName": "Вільшанська територіальна громада",
+          "communityId": 1167
+        },
+        {
+          "communityName": "Коровинська територіальна громада",
+          "communityId": 1168
+        },
+        {
+          "communityName": "м. Липова Долина та Липоводолинська територіальна громада",
+          "communityId": 1169
+        },
+        {
+          "communityName": "м. Недригайлів та Недригайлівська територіальна громада",
+          "communityId": 1170
+        },
+        {
+          "communityName": "м. Ромни та Роменська територіальна громада",
+          "communityId": 1171
+        },
+        {
+          "communityName": "Синівська територіальна громада",
+          "communityId": 1172
+        },
+        {
+          "communityName": "Хмелівська територіальна громада",
+          "communityId": 1173
+        }
+      ]
+    },
+    {
+      "districtName": "Сумський район",
+      "districtId": 114,
+      "communities": [
+        {
+          "communityName": "Бездрицька територіальна громада",
+          "communityId": 1174
+        },
+        {
+          "communityName": "м. Білопілля та Білопільська територіальна громада",
+          "communityId": 1175
+        },
+        {
+          "communityName": "Верхньосироватська територіальна громада",
+          "communityId": 1176
+        },
+        {
+          "communityName": "Ворожбянська територіальна громада",
+          "communityId": 1177
+        },
+        {
+          "communityName": "м. Краснопілля та Краснопільська територіальна громада",
+          "communityId": 1178
+        },
+        {
+          "communityName": "м. Лебедин та Лебединська територіальна громада",
+          "communityId": 1179
+        },
+        {
+          "communityName": "Миколаївська територіальна громада",
+          "communityId": 1180
+        },
+        {
+          "communityName": "Миколаївська територіальна громада",
+          "communityId": 1181
+        },
+        {
+          "communityName": "Миропільська територіальна громада",
+          "communityId": 1182
+        },
+        {
+          "communityName": "Нижньосироватська територіальна громада",
+          "communityId": 1183
+        },
+        {
+          "communityName": "Річківська територіальна громада",
+          "communityId": 1184
+        },
+        {
+          "communityName": "Садівська територіальна громада",
+          "communityId": 1185
+        },
+        {
+          "communityName": "Степанівська територіальна громада",
+          "communityId": 1186
+        },
+        {
+          "communityName": "м. Суми та Сумська територіальна громада",
+          "communityId": 1187
+        },
+        {
+          "communityName": "Хотінська територіальна громада",
+          "communityId": 1188
+        },
+        {
+          "communityName": "Юнаківська територіальна громада",
+          "communityId": 1189
+        }
+      ]
+    },
+    {
+      "districtName": "Шосткинський район",
+      "districtId": 115,
+      "communities": [
+        {
+          "communityName": "Березівська територіальна громада",
+          "communityId": 1190
+        },
+        {
+          "communityName": "м. Глухів та Глухівська територіальна громада",
+          "communityId": 1191
+        },
+        {
+          "communityName": "Дружбівська територіальна громада",
+          "communityId": 1192
+        },
+        {
+          "communityName": "Есманьська територіальна громада",
+          "communityId": 1193
+        },
+        {
+          "communityName": "Зноб-Новгородська територіальна громада",
+          "communityId": 1194
+        },
+        {
+          "communityName": "Свеська територіальна громада",
+          "communityId": 1195
+        },
+        {
+          "communityName": "м. Середина-Буда та Середино-Будська територіальна громада",
+          "communityId": 1196
+        },
+        {
+          "communityName": "Шалигинська територіальна громада",
+          "communityId": 1197
+        },
+        {
+          "communityName": "м. Шостка та Шосткинська територіальна громада",
+          "communityId": 1198
+        },
+        {
+          "communityName": "м. Ямпіль та Ямпільська територіальна громада",
+          "communityId": 1199
+        }
+      ]
+    },
+    {
+      "districtName": "Охтирський район",
+      "districtId": 118,
+      "communities": [
+        {
+          "communityName": "Боромлянська територіальна громада",
+          "communityId": 1200
+        },
+        {
+          "communityName": "м. Велика Писарівка та Великописарівська територіальна громада",
+          "communityId": 1201
+        },
+        {
+          "communityName": "Грунська територіальна громада",
+          "communityId": 1202
+        },
+        {
+          "communityName": "Кириківська територіальна громада",
+          "communityId": 1203
+        },
+        {
+          "communityName": "Комишанська територіальна громада",
+          "communityId": 1204
+        },
+        {
+          "communityName": "м. Охтирка та Охтирська територіальна громада",
+          "communityId": 1205
+        },
+        {
+          "communityName": "м. Тростянець та Тростянецька територіальна громада",
+          "communityId": 1206
+        },
+        {
+          "communityName": "Чернеччинська територіальна громада",
+          "communityId": 1207
+        },
+        {
+          "communityName": "Чупахівська територіальна громада",
+          "communityId": 1208
+        }
+      ]
+    },
+    {
+      "districtName": "Конотопський район",
+      "districtId": 117,
+      "communities": [
+        {
+          "communityName": "Бочечківська територіальна громада",
+          "communityId": 1209
+        },
+        {
+          "communityName": "м. Буринь та Буринська територіальна громада",
+          "communityId": 1210
+        },
+        {
+          "communityName": "Дубов’язівська територіальна громада",
+          "communityId": 1211
+        },
+        {
+          "communityName": "м. Конотоп та Конотопська територіальна громада",
+          "communityId": 1212
+        },
+        {
+          "communityName": "м. Кролевець та Кролевецька територіальна громада",
+          "communityId": 1213
+        },
+        {
+          "communityName": "Новослобідська територіальна громада",
+          "communityId": 1214
+        },
+        {
+          "communityName": "Попівська територіальна громада",
+          "communityId": 1215
+        },
+        {
+          "communityName": "м. Путивль та Путивльська територіальна громада",
+          "communityId": 1216
+        }
+      ]
+    }
+  ]
+}

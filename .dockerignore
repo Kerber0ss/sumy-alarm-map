@@ -1,0 +1,7 @@
+**
+!Dockerfile
+!.dockerignore
+!server.py
+!sumy-regions.json
+!public/
+!public/**

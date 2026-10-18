@@ -1,0 +1,4 @@
+services:
+  airalarm:
+    image: sumy-alarm-map:local
+    build: .
