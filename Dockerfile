@@ -3,7 +3,7 @@ FROM python:3.12-slim
 ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
 WORKDIR /app
 
-COPY server.py sumy-regions.json ./
+COPY server.py target_wire.py sumy-regions.json ./
 COPY public/ ./public/
 
 USER 65532:65532

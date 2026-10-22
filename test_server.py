@@ -1,9 +1,55 @@
 import copy
+import io
+import json
 import time
 import unittest
 from unittest.mock import patch
 
 import server
+from target_wire import decode_targets
+
+
+class PublicTargetWireTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.fixture = json.loads((server.ROOT / "tests/fixtures/public-targets-v4.json").read_text())
+
+    def test_recorded_response_matches_original_map_decoder(self):
+        self.assertEqual(decode_targets(self.fixture["wire"]), self.fixture["expected"])
+
+    def test_fetch_source_decodes_the_new_endpoint(self):
+        with patch.object(server.urllib.request, "urlopen", return_value=io.BytesIO(json.dumps(self.fixture["wire"]).encode())) as fetch:
+            self.assertEqual(server.fetch_source("targets"), self.fixture["expected"])
+        self.assertEqual(fetch.call_args.args[0].full_url, server.BASE + "/api/centrifuge/map/fallback")
+
+    def test_corrupt_truncated_and_unknown_frames_are_rejected(self):
+        wire = self.fixture["wire"]["r"]
+        for frame in (None, {}, {"r": "~5:abc"}, {"r": "~4:!"}, {"r": wire[:50]},
+                      {"r": wire[:40] + ("A" if wire[40] != "A" else "B") + wire[41:]}):
+            with self.subTest(frame=str(frame)[:60]), self.assertRaises(ValueError):
+                decode_targets(frame)
+
+    def test_disabled_public_delivery_hides_targets_and_bad_references_fail(self):
+        from target_wire import _unpack_frame
+        _, payload = _unpack_frame(self.fixture["wire"]["r"])
+        with patch("target_wire._unpack_frame", return_value=(False, payload)):
+            self.assertEqual(decode_targets(self.fixture["wire"])["targets"], [])
+        for bad_index in (-1, len(payload[5]), None):
+            bad = copy.deepcopy(payload)
+            bad[8][0][1] = bad_index
+            with patch("target_wire._unpack_frame", return_value=(True, bad)), self.assertRaises(ValueError):
+                decode_targets(self.fixture["wire"])
+
+    def test_null_update_and_invalid_clocks(self):
+        from target_wire import _unpack_frame
+        _, payload = _unpack_frame(self.fixture["wire"]["r"])
+        payload[1] = None
+        with patch("target_wire._unpack_frame", return_value=(False, payload)):
+            self.assertEqual(decode_targets(self.fixture["wire"])["updatedAt"], 0)
+        for clock in (float("nan"), float("inf"), 1e308, True, "bad"):
+            payload[0] = clock
+            with patch("target_wire._unpack_frame", return_value=(True, payload)), self.assertRaises(ValueError):
+                decode_targets(self.fixture["wire"])
 
 
 class MapDataTests(unittest.TestCase):
@@ -76,6 +122,17 @@ class MapDataTests(unittest.TestCase):
         self.assertEqual(targets[0]["districtId"], "114")
         self.assertEqual(targets[0]["heading"], 180)
         self.assertEqual(targets[0]["kind"], "unknown")
+
+    def test_new_public_frame_reaches_sumy_map(self):
+        fixture = json.loads((server.ROOT / "tests/fixtures/public-targets-v4.json").read_text())
+        server.CACHE["targets"]["data"] = decode_targets(fixture["wire"])
+        state = server.make_state(time.time())
+        self.assertTrue(state["sources"]["targets"]["fresh"])
+        self.assertEqual(state["rejectedTargets"], 0)
+        self.assertEqual(len(state["targets"]), 1)
+        self.assertEqual(state["targets"][0]["id"], "7f7ebe06f4ff4577af58f6b18d1bee8d")
+        self.assertEqual(state["targets"][0]["districtId"], "114")
+        self.assertEqual(state["targets"][0]["heading"], 270)
 
     def test_network_failure_keeps_alert_history_but_marks_it_unavailable(self):
         with patch.object(server, "fetch_source", side_effect=OSError("offline")):

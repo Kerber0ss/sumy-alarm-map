@@ -12,6 +12,7 @@ from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit
+from target_wire import decode_targets
 
 ROOT = Path(__file__).resolve().parent
 PUBLIC = ROOT / "public"
@@ -21,7 +22,7 @@ FEATURES = {str(f["properties"]["regionId"]): f for f in GEOMETRY["features"]}
 BASE = "https://map.ukrainealarm.com"
 HEADERS = {"User-Agent": "Mozilla/5.0", "Accept": "application/json", "Referer": BASE + "/"}
 ENDPOINTS = {"alerts": "/api/v2/data/mapUpdate",
-             "targets": "/api/v2/data/targetsForMapsState/public?separateTracks=false"}
+             "targets": "/api/centrifuge/map/fallback"}
 POOL = ThreadPoolExecutor(max_workers=2)
 CACHE, LOCK = {}, threading.Lock()
 DISTRICTS = {str(d["districtId"]): d for d in REGIONS["districts"]}
@@ -33,6 +34,8 @@ def fetch_source(name):
     request = urllib.request.Request(BASE + ENDPOINTS[name], headers=HEADERS)
     with urllib.request.urlopen(request, timeout=12) as response:
         data = json.load(response)
+    if name == "targets":
+        data = decode_targets(data)
     if not isinstance(data, dict) or not isinstance(data.get(name), list):
         raise ValueError("Невідомий формат відповіді джерела")
     if any(not isinstance(row, dict) for row in data[name]):
