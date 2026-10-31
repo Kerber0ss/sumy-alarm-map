@@ -17,6 +17,24 @@ class PublicTargetWireTests(unittest.TestCase):
     def test_recorded_response_matches_original_map_decoder(self):
         self.assertEqual(decode_targets(self.fixture["wire"]), self.fixture["expected"])
 
+    def test_v5_response_matches_original_parser_and_reaches_sumy(self):
+        fixture = json.loads((server.ROOT / "tests/fixtures/public-targets-v5.json").read_text())
+        self.assertEqual(decode_targets(fixture["wire"]), fixture["expected"])
+        from target_wire import _unpack_frame
+        enabled, payload = _unpack_frame(fixture["wire"]["n"])
+        planes = fixture["planes"]
+        self.assertEqual(enabled, planes[2][1])
+        self.assertEqual(payload, planes[3] + [planes[4][1], planes[4][2], planes[4][0],
+                                              planes[5][2], planes[5][1], planes[5][0], planes[5][3]])
+
+    def test_unknown_and_mismatched_envelope_versions_fail_closed(self):
+        wire = json.loads((server.ROOT / "tests/fixtures/public-targets-v5.json").read_text())["wire"]
+        for frame in ({"n": wire["n"].replace("~5:", "~6:", 1)},
+                      {"n": wire["n"].replace("~5:", "~4:", 1)},
+                      {"n": None, "r": self.fixture["wire"]["r"]}):
+            with self.subTest(frame=str(frame)[:40]), self.assertRaises(ValueError):
+                decode_targets(frame)
+
     def test_fetch_source_decodes_the_new_endpoint(self):
         with patch.object(server.urllib.request, "urlopen", return_value=io.BytesIO(json.dumps(self.fixture["wire"]).encode())) as fetch:
             self.assertEqual(server.fetch_source("targets"), self.fixture["expected"])
@@ -133,6 +151,16 @@ class MapDataTests(unittest.TestCase):
         self.assertEqual(state["targets"][0]["id"], "7f7ebe06f4ff4577af58f6b18d1bee8d")
         self.assertEqual(state["targets"][0]["districtId"], "114")
         self.assertEqual(state["targets"][0]["heading"], 270)
+
+    def test_v5_public_frame_reaches_sumy_map(self):
+        fixture = json.loads((server.ROOT / "tests/fixtures/public-targets-v5.json").read_text())
+        server.CACHE["targets"]["data"] = decode_targets(fixture["wire"])
+        state = server.make_state(time.time())
+        self.assertTrue(state["sources"]["targets"]["fresh"])
+        self.assertEqual(state["rejectedTargets"], 0)
+        self.assertEqual(len(state["targets"]), 2)
+        self.assertEqual({t["districtId"] for t in state["targets"]}, {"114", "117"})
+        self.assertTrue(all(t["kind"] == "shahed-jet" for t in state["targets"]))
 
     def test_network_failure_keeps_alert_history_but_marks_it_unavailable(self):
         with patch.object(server, "fetch_source", side_effect=OSError("offline")):

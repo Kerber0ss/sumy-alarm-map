@@ -1,4 +1,4 @@
-"""Decode the public map's ~4 snapshot envelope (mapRuntime.js, 2026-10-22).
+"""Decode public ~4/~5 snapshots (mapRuntime.js, checked 2026-10-31).
 
 Only public targets and their freshness metadata are retained; heat trails are
 not used by this viewer. No downloaded JavaScript is executed.
@@ -22,7 +22,7 @@ def _random(seed):
 
 
 def _unpack_frame(frame):
-    if not isinstance(frame, str) or not frame.startswith("~4:"):
+    if not isinstance(frame, str) or not frame.startswith(("~4:", "~5:")):
         raise ValueError("Unsupported public target frame")
     encoded = frame[3:]
     if not 0 < len(encoded) <= 11184832 or len(encoded) % 4 == 1 or not re.fullmatch(r"[A-Za-z0-9_-]+", encoded):
@@ -141,9 +141,24 @@ def _unpack_frame(frame):
         raise ValueError("Invalid public frame value")
 
     result = read()
-    if offset != len(data) or not isinstance(result, list) or len(result) != 5:
+    if offset != len(data) or not isinstance(result, list):
         raise ValueError("Invalid public frame envelope")
-    epoch, revision, enabled, coverage, payload = result
+    if frame.startswith("~5:"):
+        # v5 rearranges the same tables into presentation planes.
+        if (len(result) != 6 or type(result[0]) is not int or result[0] != 5
+                or any(not isinstance(part, list) or len(part) != size
+                       for part, size in zip(result[1:], (2, 2, 5, 3, 4)))):
+            raise ValueError("Invalid public presentation planes")
+        _, (revision, epoch), (coverage, enabled), timing, tables, rows = result
+        clock, updated, extrapolated, fog, ttl = timing
+        ids, cells, styles = tables
+        extrapolation, trail, targets, movement = rows
+        payload = [clock, updated, extrapolated, fog, ttl, cells, styles, ids,
+                   targets, trail, extrapolation, movement]
+    else:
+        if len(result) != 5:
+            raise ValueError("Invalid public frame envelope")
+        epoch, revision, enabled, coverage, payload = result
     if (not isinstance(epoch, str) or not isinstance(revision, str) or not isinstance(enabled, bool)
             or type(coverage) not in (int, float) or not 0 <= coverage <= 100
             or not isinstance(payload, list) or len(payload) != 12):
@@ -154,7 +169,7 @@ def _unpack_frame(frame):
 def decode_targets(data):
     """Return the subset consumed by server.py; fail closed on unknown formats."""
     try:
-        enabled, payload = _unpack_frame(data.get("r"))
+        enabled, payload = _unpack_frame(data.get("n") if "n" in data else data.get("r"))
         clock, updated, _, _, ttl, cells, styles, ids, rows, _, _, _ = payload
         if (type(clock) not in (int, float) or not 0 < clock <= 9007199254740991
                 or (updated is not None and (type(updated) not in (int, float) or not -clock <= updated <= 9007199254740991 - clock))
