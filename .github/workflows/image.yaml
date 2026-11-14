@@ -2,7 +2,7 @@ name: Test and publish container
 
 on:
   push:
-    branches: [main]
+    branches: [main, neptun]
   workflow_dispatch:
 
 permissions:
@@ -18,6 +18,7 @@ env:
 
 jobs:
   publish:
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/neptun'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -66,7 +67,7 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
-            ${{ env.AIRALARM_IMAGE }}:latest
+            ${{ env.AIRALARM_IMAGE }}:${{ github.ref == 'refs/heads/main' && 'latest' || 'neptun' }}
             ${{ env.AIRALARM_IMAGE }}:sha-${{ github.sha }}
           labels: |
             org.opencontainers.image.source=https://github.com/Kerber0ss/sumy-alarm-map

@@ -15,6 +15,8 @@ docker compose up -d
 
 Образ: **`ghcr.io/kerber0ss/sumy-alarm-map:latest`**, Linux `amd64` и `arm64`. GitHub Actions проверяет приложение и контейнер перед публикацией; после каждого push в `main` обновляет `latest` и добавляет тег `sha-<полный commit SHA>`.
 
+Ветка `neptun` автоматически публикует отдельный образ `ghcr.io/kerber0ss/sumy-alarm-map:neptun` (amd64 и arm64). Для его использования замените `:latest` на `:neptun` в `compose.yaml`, затем выполните `docker compose pull && docker compose up -d`. Тег `latest` публикуется только из `main`; ручной запуск разрешён для `main` и `neptun` с теми же тегами.
+
 - **[Portainer: пошаговая инструкция](PORTAINER.md)** — Stack без сборки, через Web editor или Git.
 - **[VPS: запуск и обновление](VPS.md)** — Docker Compose, порт, HTTPS и HA.
 - [Сторонние материалы и источник данных](THIRD_PARTY.md).
