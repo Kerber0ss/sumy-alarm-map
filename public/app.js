@@ -217,13 +217,13 @@ async function start() {
       renderDistricts(fresh.alerts);
       renderTargets(fresh.targets);
     }
-    map.fitBounds((regionLayers.get(selectedRegion) || outline).getBounds(), {padding: [25, 75]});
+    map.fitBounds(bounds || (regionLayers.get(selectedRegion) || regionLayers.get("oblast:сумська") || outline).getBounds(), {padding: [25, 75]});
   });
   markerLayer = L.layerGroup().addTo(map);
-  const fit = () => {
+  const fit = (bounds) => {
     map.closePopup();
     const mobile = window.innerWidth <= 580 && !document.body.classList.contains("map-only");
-    map.fitBounds((regionLayers.get(selectedRegion) || outline).getBounds(), {
+    map.fitBounds(bounds || (regionLayers.get(selectedRegion) || regionLayers.get("oblast:сумська") || outline).getBounds(), {
       animate: false,
       paddingTopLeft: mobile ? [25, 70] : [12, 12],
       paddingBottomRight: mobile ? [25, 100] : [12, 12]
@@ -248,7 +248,7 @@ async function start() {
       renderDistricts(fresh.alerts);
       renderTargets(fresh.targets);
     }
-    fit();
+    fit(outline.getBounds());
   });
   $("toggle-interface").addEventListener("click", () => {
     const mapOnly = document.body.classList.toggle("map-only");
