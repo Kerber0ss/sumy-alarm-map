@@ -217,7 +217,7 @@ async function start() {
       renderDistricts(fresh.alerts);
       renderTargets(fresh.targets);
     }
-    map.fitBounds(bounds || (regionLayers.get(selectedRegion) || regionLayers.get("oblast:сумська") || outline).getBounds(), {padding: [25, 75]});
+    map.fitBounds((regionLayers.get(selectedRegion) || outline).getBounds(), {padding: [25, 75]});
   });
   markerLayer = L.layerGroup().addTo(map);
   const fit = (bounds) => {
