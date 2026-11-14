@@ -3,6 +3,7 @@
 const colors = {red: "#ff6878", yellow: "#f6c76a", none: "#7c9a9e", unknown: "#8997b6"};
 const labels = {red: "Червона", yellow: "Жовта", none: "Не оголошена", unknown: "Немає даних"};
 const kinds = {shahed: "Шахед", "shahed-jet": "Реактивний шахед", missile: "Крилата ракета", banderol: "Бандероль", airbomb: "КАБ", drone: "БПЛА", unknown: "Ціль · тип невідомий"};
+Object.assign(kinds, {ballistic: "Балістична ракета", recon: "Розвідувальний БПЛА", fpv: "FPV-дрон", mig31k: "МіГ-31К"});
 const directions = ["на північ", "на північний схід", "на схід", "на південний схід", "на південь", "на південний захід", "на захід", "на північний захід"];
 const escapeHTML = value => String(value ?? "").replace(/[&<>"']/g, ch => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[ch]));
 const $ = id => document.getElementById(id);
@@ -80,17 +81,33 @@ function markerIcon(target) {
   return L.divIcon({className: "target-marker", iconSize: [44, 44], iconAnchor: [22, 22], popupAnchor: [0, -24], html: `<div class="original-target ${target.fading ? "target-fading" : ""}"><img src="${icon}" alt="" width="44" height="44" style="transform:rotate(${target.heading ?? 0}deg)"></div>`});
 }
 
+function targetDetails(t) {
+  const confidence = {low: "низька", medium: "середня", high: "висока"};
+  const notes = [];
+  if (t.areaOnly) notes.push("Повідомлення про область — точне місце невідоме");
+  if (t.advisory) notes.push("Інформаційне спостереження");
+  if (t.presumptiveCourse) notes.push("Курс імовірний");
+  if (Number.isFinite(t.count) && t.count > 0) notes.push(`У групі: ${t.count}`);
+  if (confidence[t.confidence]) notes.push(`Достовірність: ${confidence[t.confidence]}`);
+  if (Number.isFinite(t.sourceCount)) notes.push(`Джерел: ${t.sourceCount}`);
+  if (!t.areaOnly && Number.isFinite(t.uncertaintyKm)) notes.push(`Невизначеність позиції: ${t.uncertaintyKm} км`);
+  if (!t.areaOnly && Number.isFinite(t.velocity?.speedKmh)) notes.push(`Швидкість: ${t.velocity.speedKmh} км/год`);
+  if (t.updatedAt && Number.isFinite(Date.parse(t.updatedAt))) notes.push(`Оновлено ${dateFormat.format(new Date(t.updatedAt))}`);
+  return notes.map(escapeHTML).join("<br>");
+}
+
 function renderTargets(fresh) {
   const targets = fresh ? data.targets : [];
   $("target-count").textContent = fresh ? targets.length : "—";
-  const present = new Set(targets.map(t => t.id));
+  const present = new Set(targets.filter(t => !t.areaOnly).map(t => t.id));
   for (const [id, marker] of targetMarkers) {
     if (!present.has(id)) { markerLayer.removeLayer(marker); targetMarkers.delete(id); }
   }
   for (const target of targets) {
-    const title = kinds[target.kind] || kinds.unknown;
+    if (target.areaOnly) continue;
+    const title = target.title || kinds[target.kind] || kinds.unknown;
     const district = data.districts.find(d => d.id === target.districtId);
-    const popup = `<strong>${escapeHTML(title)}</strong><p>${escapeHTML(target.community || district?.name || "Сумська область")}</p><p>${escapeHTML(course(target.heading))}</p><p class="popup-note">Приблизно ${target.lat.toFixed(2)}° N, ${target.lon.toFixed(2)}° E<br>Публічна позначка; позиція може бути затримана.${target.fading ? "<br>Позначка згасає у джерелі." : ""}</p>`;
+    const popup = `<strong>${escapeHTML(title)}</strong><p>${escapeHTML(target.locality || target.community || district?.name || "Сумська область")}</p><p>${escapeHTML(course(target.heading))}</p><p>${escapeHTML(target.description)}</p><p class="popup-note">${targetDetails(target)}</p><p class="popup-note">Приблизно ${target.lat.toFixed(2)}° N, ${target.lon.toFixed(2)}° E<br>Публічна позначка; позиція може бути затримана.${target.fading ? "<br>Позначка згасає у джерелі." : ""}</p>`;
     let marker = targetMarkers.get(target.id);
     if (!marker) {
       marker = L.marker([target.lat, target.lon], {icon: markerIcon(target), title: title, keyboard: true}).addTo(markerLayer).bindPopup(popup);
@@ -104,7 +121,7 @@ function renderTargets(fresh) {
   } else if (!targets.length) {
     $("targets").innerHTML = '<div class="empty-state">У джерелі немає позначок в області<small>Це не означає відсутності загроз. Орієнтуйтеся на офіційні тривоги.</small></div>';
   } else {
-    $("targets").innerHTML = targets.map((t, i) => `<button class="target-card" type="button" data-target="${escapeHTML(t.id)}"><span class="target-title"><strong>${escapeHTML(kinds[t.kind] || kinds.unknown)}</strong><span class="target-label">${String(i + 1).padStart(2, "0")}${t.fading ? " · ЗГАСАЄ" : ""}</span></span><span class="target-location">${escapeHTML(t.community || data.districts.find(d => d.id === t.districtId)?.name || "Сумська область")}</span><span class="target-meta">${t.heading == null ? "" : `<span class="target-course-arrow" style="transform:rotate(${t.heading}deg)">↑</span>`}${escapeHTML(course(t.heading))}</span></button>`).join("");
+    $("targets").innerHTML = targets.map((t, i) => `<button class="target-card" type="button" data-target="${escapeHTML(t.id)}"><span class="target-title"><strong>${escapeHTML(t.title || kinds[t.kind] || kinds.unknown)}</strong><span class="target-label">${String(i + 1).padStart(2, "0")}${t.fading ? " · ЗГАСАЄ" : ""}</span></span><span class="target-location">${escapeHTML(t.locality || t.community || data.districts.find(d => d.id === t.districtId)?.name || "Сумська область")}</span><span class="target-meta">${t.heading == null ? "" : `<span class="target-course-arrow" style="transform:rotate(${t.heading}deg)">↑</span>`}${escapeHTML(t.areaOnly ? "Точне місце невідоме" : course(t.heading))}</span><span class="target-meta">${targetDetails(t)}</span>${t.description ? `<span class="target-meta">${escapeHTML(t.description)}</span>` : ""}</button>`).join("");
   }
 }
 
@@ -169,6 +186,7 @@ async function start() {
   const geometry = await response.json();
   for (const feature of geometry.features) geometryById.set(String(feature.properties.regionId), feature);
   map = L.map("map", {zoomControl: false, minZoom: 6, maxZoom: 15, zoomSnap: .1, preferCanvas: false});
+  map.attributionControl.addAttribution('<a href="https://neptun.in.ua/" target="_blank" rel="noopener">Дані: NEPTUN</a>');
   L.control.zoom({position: "topright"}).addTo(map);
   const tiles = L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {maxZoom: 19, attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'}).addTo(map);
   tiles.on("tileerror", () => { tileFailures++; updateStatus(); });

@@ -12,7 +12,7 @@ from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit
-from target_wire import decode_targets
+from neptun import decode_neptun
 
 ROOT = Path(__file__).resolve().parent
 PUBLIC = ROOT / "public"
@@ -22,7 +22,7 @@ FEATURES = {str(f["properties"]["regionId"]): f for f in GEOMETRY["features"]}
 BASE = "https://map.ukrainealarm.com"
 HEADERS = {"User-Agent": "Mozilla/5.0", "Accept": "application/json", "Referer": BASE + "/"}
 ENDPOINTS = {"alerts": "/api/v2/data/mapUpdate",
-             "targets": "/api/centrifuge/map/fallback"}
+             "targets": "https://neptun.in.ua/api/v1/threats"}
 POOL = ThreadPoolExecutor(max_workers=2)
 CACHE, LOCK = {}, threading.Lock()
 DISTRICTS = {str(d["districtId"]): d for d in REGIONS["districts"]}
@@ -31,11 +31,12 @@ COMMUNITY_DISTRICT = {str(c["communityId"]): str(d["districtId"])
 
 
 def fetch_source(name):
-    request = urllib.request.Request(BASE + ENDPOINTS[name], headers=HEADERS)
+    url = ENDPOINTS[name]
+    request = urllib.request.Request(url if url.startswith("https://") else BASE + url, headers=HEADERS)
     with urllib.request.urlopen(request, timeout=12) as response:
         data = json.load(response)
     if name == "targets":
-        data = decode_targets(data)
+        data = decode_neptun(data)
     if not isinstance(data, dict) or not isinstance(data.get(name), list):
         raise ValueError("Невідомий формат відповіді джерела")
     if any(not isinstance(row, dict) for row in data[name]):
@@ -98,6 +99,9 @@ def alert_level(items):
 
 def target_kind(target):
     # A default Shahed icon in the source renderer is not a positive classification.
+    neptun_kinds = {"uav": "drone", "recon": "recon", "fpv": "fpv", "ballistic": "ballistic", "kab": "airbomb", "mig31k": "mig31k"}
+    if target.get("type") in neptun_kinds:
+        return neptun_kinds[target["type"]]
     classification = str(target.get("detectedType") or "") + " " + str(target.get("iconName") or "")
     classification = classification.lower()
     if "shahed" in classification:
@@ -114,7 +118,7 @@ def source_status(name, now):
     age = now - entry.get("fetchedAt", 0)
     fresh = bool(entry.get("ok")) and age <= 30
     snapshot_age = None
-    if name == "targets" and data.get("targets"):
+    if name == "targets":
         try:
             snapshot_age = max(0, (float(data["serverTime"]) - float(data["updatedAt"])) / 1000) + age
             ttl = float(data["snapshotTtl"])
@@ -152,15 +156,35 @@ def make_state(now):
     if statuses["targets"]["fresh"]:
         for raw in (CACHE["targets"].get("data") or {}).get("targets", []):
             try:
-                lon, lat = normalized_to_lnglat(raw["x"], raw["y"])
-                if not contains(lon, lat, FEATURES["20"]["geometry"]):
+                area_only = bool(raw.get("areaOnly"))
+                if "lon" in raw or "lat" in raw:
+                    lon, lat = float(raw["lon"]), float(raw["lat"])
+                    if not (math.isfinite(lon) and math.isfinite(lat) and -180 <= lon <= 180 and -90 <= lat <= 90):
+                        raise ValueError("Invalid coordinates")
+                else:
+                    lon, lat = normalized_to_lnglat(raw["x"], raw["y"])
+                if area_only and raw.get("region") != "Сумська область":
+                    continue
+                if not area_only and not contains(lon, lat, FEATURES["20"]["geometry"]):
                     continue
                 district_id = next((rid for rid in DISTRICTS if contains(lon, lat, FEATURES[rid]["geometry"])), None)
                 community = next((FEATURES[cid]["properties"]["name"] for cid in COMMUNITY_DISTRICT
                                   if cid in FEATURES and contains(lon, lat, FEATURES[cid]["geometry"])), "")
-                heading = raw.get("heading")
+                heading = None if area_only else raw.get("heading")
                 heading = float(heading) % 360 if heading is not None and math.isfinite(float(heading)) else None
-                targets.append({"id": str(raw["trackId"]), "lon": lon, "lat": lat,
+                if not isinstance(raw.get("trackId"), str) or not raw["trackId"]:
+                    raise ValueError("Missing track ID")
+                targets.append({"title": raw.get("title", ""), "areaOnly": area_only,
+                                "locality": raw.get("locality", ""),
+                                "description": raw.get("explanationShort", ""),
+                                "confidence": raw.get("displayConfidence") or raw.get("confidenceLevel"),
+                                "sourceCount": raw.get("sourceCount"), "updatedAt": raw.get("updatedAt"),
+                                "uncertaintyKm": raw.get("uncertaintyKm"),
+                                "positionQuality": raw.get("positionQuality"),
+                                "advisory": bool(raw.get("advisory")),
+                                "presumptiveCourse": bool(raw.get("presumptiveCourse")),
+                                "velocity": raw.get("velocity") if not area_only else None,
+                                "id": str(raw["trackId"]), "lon": lon, "lat": lat,
                                 "heading": heading, "kind": target_kind(raw),
                                 "classification": raw.get("detectedType") or "",
                                 "iconName": raw.get("iconName") or "",

@@ -35,11 +35,6 @@ class PublicTargetWireTests(unittest.TestCase):
             with self.subTest(frame=str(frame)[:40]), self.assertRaises(ValueError):
                 decode_targets(frame)
 
-    def test_fetch_source_decodes_the_new_endpoint(self):
-        with patch.object(server.urllib.request, "urlopen", return_value=io.BytesIO(json.dumps(self.fixture["wire"]).encode())) as fetch:
-            self.assertEqual(server.fetch_source("targets"), self.fixture["expected"])
-        self.assertEqual(fetch.call_args.args[0].full_url, server.BASE + "/api/centrifuge/map/fallback")
-
     def test_corrupt_truncated_and_unknown_frames_are_rejected(self):
         wire = self.fixture["wire"]["r"]
         for frame in (None, {}, {"r": "~5:abc"}, {"r": "~4:!"}, {"r": wire[:50]},
@@ -168,6 +163,52 @@ class MapDataTests(unittest.TestCase):
         self.assertFalse(state["sources"]["alerts"]["fresh"])
         self.assertFalse(state["sources"]["targets"]["fresh"])
         self.assertEqual(state["targets"], [])
+
+
+class NeptunTests(unittest.TestCase):
+    setUp = MapDataTests.setUp
+    tearDown = MapDataTests.tearDown
+
+    def snapshot(self, **fields):
+        from datetime import datetime, timezone
+        from neptun import decode_neptun
+        row = {"id": "neptun-test", "type": "uav", "title": "БПЛА", "lat": 50.91,
+               "lon": 34.8, "heading": 270, "status": "active", "count": 3,
+               "region": "Сумська область", "confidenceLevel": "high", "sourceCount": 2}
+        row.update(fields)
+        return decode_neptun({"serverTime": datetime.now(timezone.utc).isoformat(), "threats": [row]})
+
+    def test_neptun_coordinates_and_metadata_reach_map(self):
+        server.CACHE["targets"]["data"] = self.snapshot()
+        target = server.make_state(time.time())["targets"][0]
+        self.assertEqual((target["lon"], target["lat"], target["heading"]), (34.8, 50.91, 270))
+        self.assertEqual((target["count"], target["confidence"], target["sourceCount"]), (3, "high", 2))
+        self.assertEqual(target["kind"], "drone")
+
+    def test_area_only_has_no_course_and_other_oblast_is_excluded(self):
+        server.CACHE["targets"]["data"] = self.snapshot(areaOnly=True)
+        target = server.make_state(time.time())["targets"][0]
+        self.assertTrue(target["areaOnly"])
+        self.assertIsNone(target["heading"])
+        server.CACHE["targets"]["data"] = self.snapshot(areaOnly=True, region="Київська область")
+        self.assertEqual(server.make_state(time.time())["targets"], [])
+
+    def test_invalid_coordinates_and_resolved_targets_are_hidden(self):
+        for fields in ({"lon": float("nan")}, {"lat": 91}, {"status": "resolved"}, {"id": None}):
+            server.CACHE["targets"]["data"] = self.snapshot(**fields)
+            self.assertEqual(server.make_state(time.time())["targets"], [])
+
+    def test_fetch_source_uses_neptun_endpoint(self):
+        from datetime import datetime, timezone
+        raw = {"serverTime": datetime.now(timezone.utc).isoformat(), "threats": []}
+        with patch.object(server.urllib.request, "urlopen", return_value=io.BytesIO(json.dumps(raw).encode())) as fetch:
+            self.assertEqual(server.fetch_source("targets")["targets"], [])
+        self.assertEqual(fetch.call_args.args[0].full_url, "https://neptun.in.ua/api/v1/threats")
+
+    def test_old_snapshot_is_not_fresh(self):
+        from neptun import decode_neptun
+        server.CACHE["targets"]["data"] = decode_neptun({"serverTime": "2020-01-01T00:00:00Z", "threats": [{"id": "old"}]})
+        self.assertFalse(server.source_status("targets", time.time())["fresh"])
 
 
 if __name__ == "__main__":
