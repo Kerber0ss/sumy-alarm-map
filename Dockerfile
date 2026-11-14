@@ -3,7 +3,7 @@ FROM python:3.12-slim
 ENV PYTHONUNBUFFERED=1 PYTHONDONTWRITEBYTECODE=1
 WORKDIR /app
 
-COPY server.py neptun.py sumy-regions.json ./
+COPY server.py neptun.py ./
 COPY public/ ./public/
 
 USER 65532:65532

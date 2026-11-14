@@ -3,212 +3,169 @@ import io
 import json
 import time
 import unittest
+from datetime import datetime, timezone
 from unittest.mock import patch
 
 import server
-from target_wire import decode_targets
+from neptun import decode_neptun
 
 
-class PublicTargetWireTests(unittest.TestCase):
-    @classmethod
-    def setUpClass(cls):
-        cls.fixture = json.loads((server.ROOT / "tests/fixtures/public-targets-v4.json").read_text())
-
-    def test_recorded_response_matches_original_map_decoder(self):
-        self.assertEqual(decode_targets(self.fixture["wire"]), self.fixture["expected"])
-
-    def test_v5_response_matches_original_parser_and_reaches_sumy(self):
-        fixture = json.loads((server.ROOT / "tests/fixtures/public-targets-v5.json").read_text())
-        self.assertEqual(decode_targets(fixture["wire"]), fixture["expected"])
-        from target_wire import _unpack_frame
-        enabled, payload = _unpack_frame(fixture["wire"]["n"])
-        planes = fixture["planes"]
-        self.assertEqual(enabled, planes[2][1])
-        self.assertEqual(payload, planes[3] + [planes[4][1], planes[4][2], planes[4][0],
-                                              planes[5][2], planes[5][1], planes[5][0], planes[5][3]])
-
-    def test_unknown_and_mismatched_envelope_versions_fail_closed(self):
-        wire = json.loads((server.ROOT / "tests/fixtures/public-targets-v5.json").read_text())["wire"]
-        for frame in ({"n": wire["n"].replace("~5:", "~6:", 1)},
-                      {"n": wire["n"].replace("~5:", "~4:", 1)},
-                      {"n": None, "r": self.fixture["wire"]["r"]}):
-            with self.subTest(frame=str(frame)[:40]), self.assertRaises(ValueError):
-                decode_targets(frame)
-
-    def test_corrupt_truncated_and_unknown_frames_are_rejected(self):
-        wire = self.fixture["wire"]["r"]
-        for frame in (None, {}, {"r": "~5:abc"}, {"r": "~4:!"}, {"r": wire[:50]},
-                      {"r": wire[:40] + ("A" if wire[40] != "A" else "B") + wire[41:]}):
-            with self.subTest(frame=str(frame)[:60]), self.assertRaises(ValueError):
-                decode_targets(frame)
-
-    def test_disabled_public_delivery_hides_targets_and_bad_references_fail(self):
-        from target_wire import _unpack_frame
-        _, payload = _unpack_frame(self.fixture["wire"]["r"])
-        with patch("target_wire._unpack_frame", return_value=(False, payload)):
-            self.assertEqual(decode_targets(self.fixture["wire"])["targets"], [])
-        for bad_index in (-1, len(payload[5]), None):
-            bad = copy.deepcopy(payload)
-            bad[8][0][1] = bad_index
-            with patch("target_wire._unpack_frame", return_value=(True, bad)), self.assertRaises(ValueError):
-                decode_targets(self.fixture["wire"])
-
-    def test_null_update_and_invalid_clocks(self):
-        from target_wire import _unpack_frame
-        _, payload = _unpack_frame(self.fixture["wire"]["r"])
-        payload[1] = None
-        with patch("target_wire._unpack_frame", return_value=(False, payload)):
-            self.assertEqual(decode_targets(self.fixture["wire"])["updatedAt"], 0)
-        for clock in (float("nan"), float("inf"), 1e308, True, "bad"):
-            payload[0] = clock
-            with patch("target_wire._unpack_frame", return_value=(True, payload)), self.assertRaises(ValueError):
-                decode_targets(self.fixture["wire"])
-
-
-class MapDataTests(unittest.TestCase):
+class UkraineMapTests(unittest.TestCase):
     def setUp(self):
         self.saved = copy.deepcopy(server.CACHE)
-        now = time.time()
+        self.now = time.time()
         server.CACHE.clear()
         server.CACHE.update({
-            "alerts": {"ok": True, "fetchedAt": now, "data": {"alerts": []}},
-            "targets": {"ok": True, "fetchedAt": now, "data": {"targets": [], "serverTime": now * 1000, "updatedAt": now * 1000, "snapshotTtl": 30}},
+            "alerts": {"ok": True, "fetchedAt": self.now, "data": {"raions": [], "oblasts": []}},
+            "targets": {"ok": True, "fetchedAt": self.now, "data": {
+                "targets": [], "serverTime": self.now * 1000, "updatedAt": self.now * 1000, "snapshotTtl": 30}},
         })
 
     def tearDown(self):
         server.CACHE.clear()
         server.CACHE.update(self.saved)
 
-    def test_red_wins_but_both_levels_are_retained(self):
-        rows = [{"regionId": "115", "activeAlerts": [{"type": "AIR", "activeAlertLevels": [{"alertLevel": "Yellow"}, {"alertLevel": "Red"}]}]}]
-        alerts = server.air_alerts(rows, "115")
-        self.assertEqual(server.alert_level(alerts), "red")
-        self.assertEqual({a["level"] for a in alerts}, {"red", "yellow"})
-        rows[0]["activeAlerts"][0]["activeAlertLevels"] = [{"alertLevel": "Purple"}]
-        self.assertEqual(server.alert_level(server.air_alerts(rows, "115")), "unknown")
+    def state(self):
+        return server.make_state(self.now)
 
-    def test_unclassified_target_is_not_a_shahed(self):
-        self.assertEqual(server.target_kind({"type": 8, "iconName": "", "detectedType": ""}), "unknown")
-        self.assertEqual(server.target_kind({"detectedType": "ShahedJet"}), "shahed-jet")
+    def set_threats(self, *rows):
+        server.CACHE["targets"]["data"] = decode_neptun({
+            "serverTime": datetime.now(timezone.utc).isoformat(), "threats": list(rows)})
 
-    def test_oblast_alert_inherits_and_local_community_stays_local(self):
-        server.CACHE["alerts"]["data"]["alerts"] = [
-            {"regionId": "20", "activeAlerts": [{"type": "AIR", "activeAlertLevels": [{"alertLevel": "Yellow"}]}]},
-            {"regionId": "1188", "activeAlerts": [{"regionId": "1188", "type": "AIR", "activeAlertLevels": [{"alertLevel": "Red"}]}]},
-        ]
-        state = server.make_state(time.time())
-        self.assertTrue(all(d["level"] == "yellow" for d in state["districts"]))
-        self.assertEqual(state["communities"][0]["level"], "red")
-        self.assertEqual(next(d for d in state["districts"] if d["id"] == "114")["local"][0]["level"], "red")
+    def threat(self, id="track", **fields):
+        row = {"id": id, "type": "uav", "title": "БПЛА", "lat": 50.91, "lon": 34.8,
+               "region": "Сумська область", "heading": 270, "status": "active", "count": 3,
+               "confidenceLevel": "high", "sourceCount": 2}
+        return {**row, **fields}
 
-    def test_expired_or_failed_targets_are_hidden(self):
-        entry = server.CACHE["targets"]
-        entry["data"]["targets"] = [{"trackId": "test", "x": .7, "y": .2}]
-        entry["data"]["updatedAt"] -= 31000
-        self.assertFalse(server.source_status("targets", time.time())["fresh"])
-        self.assertEqual(server.make_state(time.time())["targets"], [])
-        entry["data"]["updatedAt"] = entry["data"]["serverTime"]
-        entry["ok"] = False
-        self.assertFalse(server.source_status("targets", time.time())["fresh"])
+    def test_all_regions_districts_and_separate_cities_exist(self):
+        state = self.state()
+        self.assertEqual(len(state["regions"]), 27)
+        self.assertEqual(len(server.DISTRICTS), 136)
+        self.assertEqual(len(state["districts"]), 138)
+        self.assertEqual(set(server.CITIES), {"oblast:м. київ", "oblast:севастополь"})
+        self.assertEqual(len(server.FEATURES), 163)
+        self.assertTrue(all(d["properties"]["parentId"] in server.OBLASTS for d in server.DISTRICTS.values()))
 
-    def test_geo_filter_does_not_include_other_regions(self):
-        self.assertTrue(server.contains(34.8, 50.91, server.FEATURES["20"]["geometry"]))
-        self.assertFalse(server.contains(30.52, 50.45, server.FEATURES["20"]["geometry"]))
-        # Coordinates recorded from the official public map during this session.
-        lon, lat = server.normalized_to_lnglat(.698559, .167376)
-        self.assertAlmostEqual(lon, 34.82592, places=4)
-        self.assertAlmostEqual(lat, 51.09911, places=4)
-        self.assertTrue(server.contains(lon, lat, server.FEATURES["1188"]["geometry"]))
-        with self.assertRaises(ValueError):
-            server.normalized_to_lnglat(float("nan"), .5)
-        with self.assertRaises(ValueError):
-            server.normalized_to_lnglat(2, .5)
+    def test_regions_include_crimea_kyiv_and_sevastopol(self):
+        for point, expected in [((34.1, 44.95), "автономна республіка крим"),
+                                ((30.52, 50.45), "м. київ"), ((33.52, 44.6), "севастополь"),
+                                ((24.03, 49.84), "львівська"), ((36.23, 49.99), "харківська")]:
+            self.assertTrue(server.contains(*point, server.OBLASTS['oblast:' + expected]["geometry"]))
 
-    def test_only_sumy_targets_are_exposed_with_their_course(self):
-        server.CACHE["targets"]["data"]["targets"] = [
-            {"trackId": "inside", "x": .698559, "y": .167376, "heading": 180},
-            {"trackId": "outside", "x": .5, "y": .5, "detectedType": "Shahed"},
-        ]
-        targets = server.make_state(time.time())["targets"]
-        self.assertEqual(len(targets), 1)
-        self.assertEqual(targets[0]["id"], "inside")
-        self.assertEqual(targets[0]["districtId"], "114")
-        self.assertEqual(targets[0]["heading"], 180)
-        self.assertEqual(targets[0]["kind"], "unknown")
+    def test_oblast_alert_inherits_only_to_its_districts(self):
+        server.CACHE["alerts"]["data"]["oblasts"] = [{"key": "сумська", "level": "yellow"}]
+        state = self.state()
+        sumy = [d for d in state["districts"] if d["regionId"] == "oblast:сумська"]
+        self.assertEqual(len(sumy), 5)
+        self.assertTrue(all(d["level"] == "yellow" for d in sumy))
+        self.assertTrue(all(d["level"] == "none" for d in state["districts"] if d not in sumy))
 
-    def test_new_public_frame_reaches_sumy_map(self):
-        fixture = json.loads((server.ROOT / "tests/fixtures/public-targets-v4.json").read_text())
-        server.CACHE["targets"]["data"] = decode_targets(fixture["wire"])
-        state = server.make_state(time.time())
-        self.assertTrue(state["sources"]["targets"]["fresh"])
-        self.assertEqual(state["rejectedTargets"], 0)
-        self.assertEqual(len(state["targets"]), 1)
-        self.assertEqual(state["targets"][0]["id"], "7f7ebe06f4ff4577af58f6b18d1bee8d")
-        self.assertEqual(state["targets"][0]["districtId"], "114")
-        self.assertEqual(state["targets"][0]["heading"], 270)
+    def test_red_wins_and_local_yellow_is_preserved(self):
+        server.CACHE["alerts"]["data"] = {
+            "oblasts": [{"key": "київська", "level": "yellow"}],
+            "raions": [{"key": "бучанський", "level": "red", "since": "2026-11-14T12:00:00Z"}]}
+        state = self.state()
+        bucha = next(d for d in state["districts"] if d["id"] == "raion:бучанський")
+        self.assertEqual(bucha["level"], "red")
+        self.assertEqual({a["level"] for a in bucha["alerts"]}, {"red", "yellow"})
+        kyiv = next(d for d in state["districts"] if d["id"] == "oblast:м. київ")
+        self.assertEqual(kyiv["level"], "none")
 
-    def test_v5_public_frame_reaches_sumy_map(self):
-        fixture = json.loads((server.ROOT / "tests/fixtures/public-targets-v5.json").read_text())
-        server.CACHE["targets"]["data"] = decode_targets(fixture["wire"])
-        state = server.make_state(time.time())
-        self.assertTrue(state["sources"]["targets"]["fresh"])
-        self.assertEqual(state["rejectedTargets"], 0)
-        self.assertEqual(len(state["targets"]), 2)
-        self.assertEqual({t["districtId"] for t in state["targets"]}, {"114", "117"})
-        self.assertTrue(all(t["kind"] == "shahed-jet" for t in state["targets"]))
+    def test_occupied_oblast_and_city_alerts_are_shown(self):
+        server.CACHE["alerts"]["data"]["oblasts"] = [
+            {"key": key} for key in ("автономна республіка крим", "севастополь", "м. київ")]
+        state = self.state()
+        for d in state["districts"]:
+            if d["regionId"] in {"oblast:автономна республіка крим", "oblast:севастополь", "oblast:м. київ"}:
+                self.assertEqual(d["level"], "red")
 
-    def test_network_failure_keeps_alert_history_but_marks_it_unavailable(self):
+    def test_unknown_alert_level_is_not_an_all_clear(self):
+        server.CACHE["alerts"]["data"]["raions"] = [{"key": "конотопський", "level": "purple"}]
+        d = next(d for d in self.state()["districts"] if d["id"] == "raion:конотопський")
+        self.assertEqual(d["level"], "unknown")
+
+    def test_targets_across_ukraine_and_border_approaches_are_retained(self):
+        self.set_threats(self.threat(), self.threat("kyiv", lat=50.45, lon=30.52, region="м. Київ"),
+                         self.threat("odesa", lat=46.48, lon=30.73, region="Одеська область"),
+                         self.threat("border", lat=53, lon=32, region=""))
+        targets = self.state()["targets"]
+        self.assertEqual({t["id"] for t in targets}, {"track", "kyiv", "odesa", "border"})
+        self.assertEqual(next(t for t in targets if t["id"] == "kyiv")["regionId"], "oblast:м. київ")
+
+    def test_metadata_and_course_reach_client(self):
+        self.set_threats(self.threat(heading=-90, explanationShort="Опис", velocity={"speedKmh": 150}, advisory=True))
+        t = self.state()["targets"][0]
+        self.assertEqual((t["heading"], t["count"], t["confidence"], t["sourceCount"]), (270, 3, "high", 2))
+        self.assertEqual(t["description"], "Опис")
+        self.assertEqual(t["velocity"]["speedKmh"], 150)
+        self.assertTrue(t["advisory"])
+
+    def test_area_only_is_retained_for_any_oblast_without_course(self):
+        self.set_threats(self.threat(areaOnly=True, region="Одеська область", lat=46.5, lon=30.7,
+                                    velocity={"speedKmh": 150}))
+        t = self.state()["targets"][0]
+        self.assertTrue(t["areaOnly"])
+        self.assertEqual(t["regionId"], "oblast:одеська")
+        self.assertIsNone(t["districtId"])
+        self.assertIsNone(t["heading"])
+        self.assertIsNone(t["velocity"])
+
+    def test_bad_coordinates_ids_and_resolved_targets_are_hidden(self):
+        for fields in ({"lon": float("nan")}, {"lat": 91}, {"status": "resolved"}, {"id": None}):
+            with self.subTest(fields=fields):
+                self.set_threats(self.threat(**fields))
+                self.assertEqual(self.state()["targets"], [])
+
+    def test_missing_course_and_stale_target(self):
+        self.set_threats(self.threat(heading=None, status="stale"))
+        t = self.state()["targets"][0]
+        self.assertIsNone(t["heading"])
+        self.assertTrue(t["fading"])
+
+    def test_failed_and_expired_snapshots_are_hidden(self):
+        self.set_threats(self.threat())
+        server.CACHE["targets"]["ok"] = False
+        self.assertEqual(self.state()["targets"], [])
+        server.CACHE["targets"]["ok"] = True
+        server.CACHE["targets"]["data"]["updatedAt"] -= 31000
+        self.assertEqual(self.state()["targets"], [])
+
+    def test_old_empty_snapshot_is_also_unavailable(self):
+        server.CACHE["targets"]["data"] = decode_neptun({"serverTime": "2020-01-01T00:00:00Z", "threats": []})
+        self.assertFalse(self.state()["sources"]["targets"]["fresh"])
+
+    def test_network_failure_marks_both_sources_unavailable(self):
         with patch.object(server, "fetch_source", side_effect=OSError("offline")):
             state = server.get_state()
         self.assertFalse(state["sources"]["alerts"]["fresh"])
         self.assertFalse(state["sources"]["targets"]["fresh"])
-        self.assertEqual(state["targets"], [])
 
+    def test_request_throttling_uses_shared_cache(self):
+        for entry in server.CACHE.values():
+            entry["attemptAt"] = time.time()
+        with patch.object(server, "fetch_source") as fetch:
+            server.get_state()
+        fetch.assert_not_called()
 
-class NeptunTests(unittest.TestCase):
-    setUp = MapDataTests.setUp
-    tearDown = MapDataTests.tearDown
+    def test_fetch_uses_documented_neptun_endpoints(self):
+        for source, raw in [("alerts", {"raions": [], "oblasts": []}),
+                            ("targets", {"serverTime": datetime.now(timezone.utc).isoformat(), "threats": []})]:
+            with patch.object(server.urllib.request, "urlopen", return_value=io.BytesIO(json.dumps(raw).encode())) as fetch:
+                server.fetch_source(source)
+            path = "alerts" if source == "alerts" else "threats"
+            self.assertEqual(fetch.call_args.args[0].full_url, f"https://neptun.in.ua/api/v1/{path}")
 
-    def snapshot(self, **fields):
-        from datetime import datetime, timezone
-        from neptun import decode_neptun
-        row = {"id": "neptun-test", "type": "uav", "title": "БПЛА", "lat": 50.91,
-               "lon": 34.8, "heading": 270, "status": "active", "count": 3,
-               "region": "Сумська область", "confidenceLevel": "high", "sourceCount": 2}
-        row.update(fields)
-        return decode_neptun({"serverTime": datetime.now(timezone.utc).isoformat(), "threats": [row]})
+    def test_malformed_alert_snapshot_fails_closed(self):
+        for raw in ({}, {"raions": [], "oblasts": None}, {"raions": [{}], "oblasts": []}):
+            with patch.object(server.urllib.request, "urlopen", return_value=io.BytesIO(json.dumps(raw).encode())):
+                with self.assertRaises(ValueError):
+                    server.fetch_source("alerts")
 
-    def test_neptun_coordinates_and_metadata_reach_map(self):
-        server.CACHE["targets"]["data"] = self.snapshot()
-        target = server.make_state(time.time())["targets"][0]
-        self.assertEqual((target["lon"], target["lat"], target["heading"]), (34.8, 50.91, 270))
-        self.assertEqual((target["count"], target["confidence"], target["sourceCount"]), (3, "high", 2))
-        self.assertEqual(target["kind"], "drone")
-
-    def test_area_only_has_no_course_and_other_oblast_is_excluded(self):
-        server.CACHE["targets"]["data"] = self.snapshot(areaOnly=True)
-        target = server.make_state(time.time())["targets"][0]
-        self.assertTrue(target["areaOnly"])
-        self.assertIsNone(target["heading"])
-        server.CACHE["targets"]["data"] = self.snapshot(areaOnly=True, region="Київська область")
-        self.assertEqual(server.make_state(time.time())["targets"], [])
-
-    def test_invalid_coordinates_and_resolved_targets_are_hidden(self):
-        for fields in ({"lon": float("nan")}, {"lat": 91}, {"status": "resolved"}, {"id": None}):
-            server.CACHE["targets"]["data"] = self.snapshot(**fields)
-            self.assertEqual(server.make_state(time.time())["targets"], [])
-
-    def test_fetch_source_uses_neptun_endpoint(self):
-        from datetime import datetime, timezone
-        raw = {"serverTime": datetime.now(timezone.utc).isoformat(), "threats": []}
-        with patch.object(server.urllib.request, "urlopen", return_value=io.BytesIO(json.dumps(raw).encode())) as fetch:
-            self.assertEqual(server.fetch_source("targets")["targets"], [])
-        self.assertEqual(fetch.call_args.args[0].full_url, "https://neptun.in.ua/api/v1/threats")
-
-    def test_old_snapshot_is_not_fresh(self):
-        from neptun import decode_neptun
-        server.CACHE["targets"]["data"] = decode_neptun({"serverTime": "2020-01-01T00:00:00Z", "threats": [{"id": "old"}]})
-        self.assertFalse(server.source_status("targets", time.time())["fresh"])
+    def test_invalid_threat_snapshot_fails_closed(self):
+        for raw in ({}, {"serverTime": "bad", "threats": []}, {"serverTime": "2026-11-14T12:00:00", "threats": []}):
+            with self.assertRaises(ValueError):
+                decode_neptun(raw)
 
 
 if __name__ == "__main__":

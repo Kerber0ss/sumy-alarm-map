@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Local, read-only viewer of the public Ukraine Alarm map."""
+"""Read-only map of Ukraine air alerts and public NEPTUN threats."""
 import argparse
 import json
 import math
@@ -16,18 +16,18 @@ from neptun import decode_neptun
 
 ROOT = Path(__file__).resolve().parent
 PUBLIC = ROOT / "public"
-REGIONS = json.loads((ROOT / "sumy-regions.json").read_text())
-GEOMETRY = json.loads((PUBLIC / "sumy.geojson").read_text())
-FEATURES = {str(f["properties"]["regionId"]): f for f in GEOMETRY["features"]}
-BASE = "https://map.ukrainealarm.com"
+GEOMETRY = json.loads((PUBLIC / "ukraine.geojson").read_text())
+FEATURES = {f["properties"]["regionId"]: f for f in GEOMETRY["features"]}
+OBLASTS = {rid: f for rid, f in FEATURES.items() if f["properties"]["rank"] == 1}
+DISTRICTS = {rid: f for rid, f in FEATURES.items() if f["properties"]["rank"] == 2}
+# Kyiv and Sevastopol are separate administrative units without raions in this dataset.
+CITIES = {rid: f for rid, f in OBLASTS.items()
+          if not any(d["properties"]["parentId"] == rid for d in DISTRICTS.values())}
+BASE = "https://neptun.in.ua"
 HEADERS = {"User-Agent": "Mozilla/5.0", "Accept": "application/json", "Referer": BASE + "/"}
-ENDPOINTS = {"alerts": "/api/v2/data/mapUpdate",
-             "targets": "https://neptun.in.ua/api/v1/threats"}
+ENDPOINTS = {"alerts": "/api/v1/alerts", "targets": "/api/v1/threats"}
 POOL = ThreadPoolExecutor(max_workers=2)
 CACHE, LOCK = {}, threading.Lock()
-DISTRICTS = {str(d["districtId"]): d for d in REGIONS["districts"]}
-COMMUNITY_DISTRICT = {str(c["communityId"]): str(d["districtId"])
-                      for d in REGIONS["districts"] for c in d["communities"]}
 
 
 def fetch_source(name):
@@ -37,25 +37,14 @@ def fetch_source(name):
         data = json.load(response)
     if name == "targets":
         data = decode_neptun(data)
-    if not isinstance(data, dict) or not isinstance(data.get(name), list):
-        raise ValueError("Невідомий формат відповіді джерела")
-    if any(not isinstance(row, dict) for row in data[name]):
-        raise ValueError("Некоректні записи джерела")
+    else:
+        if (not isinstance(data, dict) or any(not isinstance(data.get(key), list)
+                                             for key in ("raions", "oblasts"))):
+            raise ValueError("Невідомий формат тривог NEPTUN")
+        if any(not isinstance(row, dict) or not isinstance(row.get("key"), str)
+               for key in ("raions", "oblasts") for row in data[key]):
+            raise ValueError("Некоректні записи тривог")
     return data
-
-
-def normalized_to_lnglat(x, y):
-    x, y = float(x), float(y)
-    if not (math.isfinite(x) and math.isfinite(y) and 0 <= x <= 1 and 0 <= y <= 1):
-        raise ValueError("Invalid normalized coordinates")
-    west, east, south, north = 22.137059, 40.2275801, 44.184598, 52.3791473
-    merc = lambda lat: math.log(math.tan(math.pi / 4 + math.radians(lat) / 2))
-    pw, ph = math.radians(east - west), merc(north) - merc(south)
-    scale = min(260 / pw, 175 / ph)
-    ox, oy = (260 - pw * scale) / 2, (175 - ph * scale) / 2
-    lon = west + math.degrees((x * 260 - ox) / scale)
-    my = merc(north) - (y * 175 - oy) / scale
-    return lon, math.degrees(2 * math.atan(math.exp(my)) - math.pi / 2)
 
 
 def in_ring(x, y, ring):
@@ -74,22 +63,17 @@ def contains(lon, lat, geometry):
     return any(in_ring(lon, lat, p[0]) and not any(in_ring(lon, lat, hole) for hole in p[1:]) for p in polygons)
 
 
-def air_alerts(rows, region_id):
+def air_alerts(rows, feature):
+    props = feature["properties"]
     found = []
     for row in rows:
-        if str(row.get("regionId")) != region_id:
+        if row.get("key") != props["key"]:
             continue
-        for alert in row.get("activeAlerts", []):
-            if str(alert.get("type", "")).upper() not in ("AIR", "1"):
-                continue
-            levels = alert.get("activeAlertLevels") or [{}]
-            for level in levels:
-                name = str(level.get("alertLevel", "")).lower()
-                found.append({"level": name if name in ("red", "yellow") else "unknown",
-                              "reason": level.get("reason") or "Повітряна тривога",
-                              "since": level.get("createdAt") or alert.get("lastUpdate"),
-                              "source": row.get("regionName", ""),
-                              "regionId": str(alert.get("regionId", region_id))})
+        level = str(row.get("level", "red")).lower()
+        found.append({"level": level if level in ("red", "yellow") else "unknown",
+                      "reason": row.get("reason") or "Повітряна тривога",
+                      "since": row.get("since"), "source": row.get("name", props["name"]),
+                      "regionId": props["regionId"]})
     return found
 
 
@@ -132,44 +116,40 @@ def source_status(name, now):
 
 def make_state(now):
     statuses = {name: source_status(name, now) for name in ENDPOINTS}
-    rows = (CACHE["alerts"].get("data") or {}).get("alerts", [])
-    parent = air_alerts(rows, "20")
-    districts = []
-    communities = []
-    for region_id, district in DISTRICTS.items():
-        alerts = parent + air_alerts(rows, region_id)
-        local = []
-        for community in district["communities"]:
-            cid = str(community["communityId"])
-            own = air_alerts(rows, cid)
-            if own:
-                effective = alerts + own
-                communities.append({"id": cid, "name": community["communityName"],
-                                    "level": alert_level(effective), "alerts": effective})
-                # Inherited district alerts are not a second local alarm.
-                if any(a["regionId"] == cid for a in own):
-                    local.append({"name": community["communityName"], "level": alert_level(own)})
-        districts.append({"id": region_id, "name": district["districtName"],
-                          "level": alert_level(alerts), "alerts": alerts, "local": local})
+    alerts_data = CACHE["alerts"].get("data") or {}
+    oblast_rows, raion_rows = alerts_data.get("oblasts", []), alerts_data.get("raions", [])
+    regions, districts = [], []
+    for region_id, feature in OBLASTS.items():
+        own = air_alerts(oblast_rows, feature)
+        regions.append({"id": region_id, "name": feature["properties"]["name"],
+                        "level": alert_level(own), "alerts": own, "local": []})
+    regions_by_id = {r["id"]: r for r in regions}
+    for region_id, feature in {**DISTRICTS, **CITIES}.items():
+        parent_id = feature["properties"].get("parentId", region_id)
+        parent = regions_by_id[parent_id]
+        own = air_alerts(raion_rows, feature) if region_id in DISTRICTS else []
+        alerts = parent["alerts"] + own
+        districts.append({"id": region_id, "name": feature["properties"]["name"],
+                          "regionId": parent_id, "regionName": parent["name"],
+                          "level": alert_level(alerts), "alerts": alerts, "local": []})
+        if own:
+            parent["local"].append({"name": feature["properties"]["name"], "level": alert_level(own)})
     targets = []
     rejected = 0
     if statuses["targets"]["fresh"]:
         for raw in (CACHE["targets"].get("data") or {}).get("targets", []):
             try:
                 area_only = bool(raw.get("areaOnly"))
-                if "lon" in raw or "lat" in raw:
-                    lon, lat = float(raw["lon"]), float(raw["lat"])
-                    if not (math.isfinite(lon) and math.isfinite(lat) and -180 <= lon <= 180 and -90 <= lat <= 90):
-                        raise ValueError("Invalid coordinates")
-                else:
-                    lon, lat = normalized_to_lnglat(raw["x"], raw["y"])
-                if area_only and raw.get("region") != "Сумська область":
-                    continue
-                if not area_only and not contains(lon, lat, FEATURES["20"]["geometry"]):
-                    continue
-                district_id = next((rid for rid in DISTRICTS if contains(lon, lat, FEATURES[rid]["geometry"])), None)
-                community = next((FEATURES[cid]["properties"]["name"] for cid in COMMUNITY_DISTRICT
-                                  if cid in FEATURES and contains(lon, lat, FEATURES[cid]["geometry"])), "")
+                lon, lat = float(raw["lon"]), float(raw["lat"])
+                if not (math.isfinite(lon) and math.isfinite(lat) and -180 <= lon <= 180 and -90 <= lat <= 90):
+                    raise ValueError("Invalid coordinates")
+                # Keep every public NEPTUN track, including approaches near the border.
+                # An area-only centroid is never treated as a target's position.
+                region_id = next((rid for rid, f in OBLASTS.items()
+                                  if (raw.get("region") == f["properties"]["name"] if area_only
+                                      else contains(lon, lat, f["geometry"]))), None)
+                district_id = None if area_only else next((rid for rid, f in DISTRICTS.items()
+                                   if contains(lon, lat, f["geometry"])), None)
                 heading = None if area_only else raw.get("heading")
                 heading = float(heading) % 360 if heading is not None and math.isfinite(float(heading)) else None
                 if not isinstance(raw.get("trackId"), str) or not raw["trackId"]:
@@ -188,12 +168,13 @@ def make_state(now):
                                 "heading": heading, "kind": target_kind(raw),
                                 "classification": raw.get("detectedType") or "",
                                 "iconName": raw.get("iconName") or "",
-                                "districtId": district_id, "community": community,
+                                "districtId": district_id, "community": "",
+                                "regionId": region_id, "region": raw.get("region") or (OBLASTS[region_id]["properties"]["name"] if region_id else ""),
                                 "count": raw.get("currentCount"), "fading": bool(raw.get("isFading"))})
             except (ValueError, KeyError, TypeError):
                 rejected += 1
     return {"generatedAt": now, "sources": statuses, "districts": districts,
-            "communities": communities, "targets": targets, "rejectedTargets": rejected}
+            "regions": regions, "targets": targets, "rejectedTargets": rejected}
 
 
 def get_state():
@@ -241,7 +222,7 @@ if __name__ == "__main__":
     parser.add_argument("--port", type=int, default=8765)
     args = parser.parse_args()
     server = ThreadingHTTPServer((args.host, args.port), Handler)
-    print(f"Сумщина · http://{args.host}:{args.port}", flush=True)
+    print(f"Україна · http://{args.host}:{args.port}", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

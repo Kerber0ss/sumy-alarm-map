@@ -3,6 +3,5 @@
 !.dockerignore
 !server.py
 !neptun.py
-!sumy-regions.json
 !public/
 !public/**

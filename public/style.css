@@ -15,3 +15,5 @@
 .map-only .map-panel{height:100dvh;min-height:0;width:100%}
 .map-only .map-top{justify-content:flex-end}
 @media(max-width:580px){.map-top .map-title{display:none}#toggle-interface{padding:10px 12px}}
+
+.region-filter{padding:18px 20px 0}.region-filter label{display:block;color:var(--muted);font-size:11px;margin-bottom:8px}.region-filter select{width:100%;padding:10px;background:#131f2d;border:1px solid #30444d;border-radius:8px;color:var(--text);font:inherit}.region-filter select:focus-visible{outline:2px solid var(--cyan)}

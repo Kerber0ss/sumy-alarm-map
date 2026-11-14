@@ -13,7 +13,7 @@
 2. Скачайте репозиторий:
 
    ```sh
-   git clone https://github.com/Kerber0ss/sumy-alarm-map.git
+   git clone --branch all-ukraine https://github.com/Kerber0ss/sumy-alarm-map.git
    cd sumy-alarm-map
    ```
 
@@ -25,7 +25,7 @@
    docker compose ps
    ```
 
-   Сборка на VPS не нужна. Образ находится в GHCR: `ghcr.io/kerber0ss/sumy-alarm-map:latest`. Поддерживаются amd64 и arm64. API-ключи и volumes не требуются.
+   Сборка на VPS не нужна. Образ находится в GHCR: `ghcr.io/kerber0ss/sumy-alarm-map:all-ukraine-neptun`. Поддерживаются amd64 и arm64. API-ключи и volumes не требуются.
 
 4. Проверьте HTTP и источники:
 
@@ -41,7 +41,7 @@
 
 ## Порт, сеть и HTTPS
 
-По умолчанию порт опубликован на всех интерфейсах VPS, авторизации в приложении нет. Нужен исходящий HTTPS к map.ukrainealarm.com; браузер также загружает тайлы OpenStreetMap.
+По умолчанию порт опубликован на всех интерфейсах VPS, авторизации в приложении нет. Нужен исходящий HTTPS к neptun.in.ua; браузер также загружает тайлы OpenStreetMap.
 
 Для другого порта создайте `.env` рядом с compose.yaml:
 
@@ -79,7 +79,7 @@ docker compose up -d
 docker compose ps
 ```
 
-`latest` — последняя успешная сборка main. Для фиксации/отката используйте доступный тег `sha-<полный commit SHA>` из раздела Packages репозитория вместо `latest` в поле image. Не удаляйте предыдущий образ до проверки новой версии.
+`all-ukraine-neptun` — последняя успешная сборка ветки all-ukraine. Для фиксации/отката используйте доступный тег `sha-<полный commit SHA>` из раздела Packages репозитория вместо `all-ukraine-neptun` в поле image. Не удаляйте предыдущий образ до проверки новой версии.
 
 ## Остановка
 

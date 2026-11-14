@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#0b121b">
-  <title>Сумщина · Карта тривог</title>
+  <title>Україна · Карта тривог</title>
   <link rel="stylesheet" href="/vendor/leaflet.css">
   <link rel="stylesheet" href="/style.css">
   <script defer src="/vendor/leaflet.js"></script>
@@ -12,21 +12,22 @@
 </head>
 <body class="map-only">
   <header id="interface-header" class="topbar">
-    <div class="brand"><span class="brand-icon" aria-hidden="true">◉</span><div><h1>Сумщина<span> / монітор</span></h1><p>Карта повітряних тривог</p></div></div>
+    <div class="brand"><span class="brand-icon" aria-hidden="true">◉</span><div><h1>Україна<span> / монітор</span></h1><p>Карта повітряних тривог</p></div></div>
     <div class="connection"><span id="connection-dot" class="status-dot"></span><div><strong id="connection-label">Підключення…</strong><small id="updated">Чекаємо дані джерела</small></div></div>
   </header>
   <main>
     <aside id="interface-sidebar" class="sidebar">
-      <section class="overview"><div class="eyebrow">ОБЛАСТЬ ЗАРАЗ <span>ОНОВЛЕННЯ / 10 СЕК</span></div><div class="metrics"><div><strong id="active-count">—</strong><span>районів із тривогою</span></div><div><strong id="target-count">—</strong><span>позначок цілей</span></div></div></section>
-      <section class="target-section"><div class="section-title"><h2>Повітряні цілі</h2><span class="live-label">● ПУБЛІЧНА КАРТА</span></div><p class="section-note">Останні позначки в межах області</p><div id="targets"><p class="loading">Завантажуємо позначки…</p></div></section>
-      <section class="district-section"><div class="section-title"><h2>Райони</h2><span class="subtle">5 районів</span></div><div id="districts" class="districts"><p class="loading">Завантажуємо рівні тривоги…</p></div></section>
-      <footer class="sidebar-footer"><a href="https://map.ukrainealarm.com/" target="_blank" rel="noopener">Джерело: Повітряна тривога ↗</a><span>Приблизні дані · Europe/Kyiv</span></footer>
+      <section class="overview"><div class="eyebrow">УКРАЇНА ЗАРАЗ <span>ОНОВЛЕННЯ / 10 СЕК</span></div><div class="metrics"><div><strong id="active-count">—</strong><span>районів / міст із тривогою</span></div><div><strong id="target-count">—</strong><span>позначок цілей</span></div></div></section>
+      <div class="region-filter"><label for="region-filter">Територія</label><select id="region-filter"><option value="">Вся Україна</option></select></div>
+      <section class="target-section"><div class="section-title"><h2>Повітряні цілі</h2><span class="live-label">● ПУБЛІЧНА КАРТА</span></div><p class="section-note">Публічні позначки по всій Україні</p><div id="targets"><p class="loading">Завантажуємо позначки…</p></div></section>
+      <section class="district-section"><div class="section-title"><h2>Тривоги</h2><span id="district-total" class="subtle">Райони та міста</span></div><div id="districts" class="districts"><p class="loading">Завантажуємо рівні тривоги…</p></div></section>
+      <footer class="sidebar-footer"><a href="https://neptun.in.ua/" target="_blank" rel="noopener">Дані: NEPTUN ↗</a><span>Приблизні дані · Europe/Kyiv</span></footer>
     </aside>
-    <section class="map-panel" aria-label="Карта Сумської області">
+    <section class="map-panel" aria-label="Карта України">
       <div id="map"></div>
-      <div class="map-top"><button id="toggle-interface" type="button" aria-expanded="false" aria-controls="interface-header interface-sidebar" title="Показати всі елементи інтерфейсу">☷ <span>Показати панелі</span></button><div class="map-title"><span class="status-dot neutral"></span>Сумська область<span class="map-subtitle">МЕЖІ РАЙОНІВ</span></div><button id="fit-map" type="button" title="Показати всю Сумську область">⌖ <span>Вся область</span></button></div>
+      <div class="map-top"><button id="toggle-interface" type="button" aria-expanded="false" aria-controls="interface-header interface-sidebar" title="Показати всі елементи інтерфейсу">☷ <span>Показати панелі</span></button><div class="map-title"><span class="status-dot neutral"></span>Україна<span class="map-subtitle">МЕЖІ РАЙОНІВ</span></div><button id="fit-map" type="button" title="Показати всю Україну">⌖ <span>Вся Україна</span></button></div>
       <div id="source-warning" class="source-warning" role="status" hidden></div>
-      <div class="map-bottom"><div class="legend"><span><i class="swatch red"></i>Червона</span><span><i class="swatch yellow"></i>Жовта</span><span><i class="swatch none"></i>Не оголошена</span><span><i class="swatch unknown"></i>Немає даних</span></div><p class="map-disclaimer">Позиції приблизні. Стрілка — курс із джерела, не прогноз маршруту. Відсутність цілей не означає безпеки.</p></div>
+      <div class="map-bottom"><div class="legend"><span><i class="swatch red"></i>Червона</span><span><i class="swatch yellow"></i>Жовта</span><span><i class="swatch none"></i>Не оголошена</span><span><i class="swatch unknown"></i>Немає даних</span></div><p class="map-disclaimer">Позиції приблизні. Стрілка — курс із джерела, не прогноз маршруту. Відсутність цілей не означає безпеки. Орієнтуйтеся на офіційні сигнали тривоги.</p></div>
       <div id="fatal" class="fatal" role="alert" hidden></div>
     </section>
   </main>

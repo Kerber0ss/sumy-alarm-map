@@ -1,6 +1,6 @@
 services:
   airalarm:
-    image: ghcr.io/kerber0ss/sumy-alarm-map:latest
+    image: ghcr.io/kerber0ss/sumy-alarm-map:all-ukraine-neptun
     ports:
       - "${AIRALARM_BIND_ADDRESS:-0.0.0.0}:${AIRALARM_PORT:-8765}:8765"
     restart: unless-stopped

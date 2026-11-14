@@ -2,7 +2,7 @@ name: Test and publish container
 
 on:
   push:
-    branches: [main, neptun]
+    branches: [main, neptun, all-ukraine]
   workflow_dispatch:
 
 permissions:
@@ -18,7 +18,7 @@ env:
 
 jobs:
   publish:
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/neptun'
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/neptun' || github.ref == 'refs/heads/all-ukraine'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -26,6 +26,7 @@ jobs:
         run: |
           python3 -m unittest -v test_server.py
           node --check public/app.js
+          node test_app.js
           docker compose config --quiet
       - name: Build and smoke-test container
         run: |
@@ -37,7 +38,10 @@ jobs:
           import json, urllib.request, urllib.error
           base = 'http://127.0.0.1:18765'
           state = json.load(urllib.request.urlopen(base + '/api/state', timeout=30))
-          assert len(state['districts']) == 5
+          assert len(state['districts']) == 138
+          assert len(state['regions']) == 27
+          geometry = json.load(urllib.request.urlopen(base + '/ukraine.geojson'))
+          assert len(geometry['features']) == 163
           assert isinstance(state['targets'], list)
           for path in ['/server.py', '/analysis/Secrets/map-session-tokens.json']:
               try:
@@ -67,11 +71,11 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           tags: |
-            ${{ env.AIRALARM_IMAGE }}:${{ github.ref == 'refs/heads/main' && 'latest' || 'neptun' }}
+            ${{ env.AIRALARM_IMAGE }}:${{ github.ref == 'refs/heads/main' && 'latest' || github.ref == 'refs/heads/neptun' && 'neptun' || 'all-ukraine-neptun' }}
             ${{ env.AIRALARM_IMAGE }}:sha-${{ github.sha }}
           labels: |
             org.opencontainers.image.source=https://github.com/Kerber0ss/sumy-alarm-map
-            org.opencontainers.image.description=Sumy region public air alert map
+            org.opencontainers.image.description=Ukraine public air alert and NEPTUN threat map
             org.opencontainers.image.revision=${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

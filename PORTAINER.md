@@ -1,6 +1,6 @@
 # Запуск через Portainer
 
-Инструкция для **Docker Standalone** environment в Portainer. Используется готовый образ GHCR, сборка на сервере не нужна. У сервера должен быть доступ к ghcr.io и map.ukrainealarm.com, а у браузера — к тайлам OpenStreetMap.
+Инструкция для **Docker Standalone** environment в Portainer. Используется готовый образ GHCR, сборка на сервере не нужна. У сервера должен быть доступ к ghcr.io и neptun.in.ua, а у браузера — к тайлам OpenStreetMap.
 
 ## Через Web editor
 
@@ -10,7 +10,7 @@
 ```yaml
 services:
   airalarm:
-    image: ghcr.io/kerber0ss/sumy-alarm-map:latest
+    image: ghcr.io/kerber0ss/sumy-alarm-map:all-ukraine-neptun
     ports:
       - "${AIRALARM_BIND_ADDRESS:-0.0.0.0}:${AIRALARM_PORT:-8765}:8765"
     restart: unless-stopped
@@ -43,7 +43,7 @@ services:
 
 ```text
 Repository URL: https://github.com/Kerber0ss/sumy-alarm-map
-Repository reference: refs/heads/main
+Repository reference: refs/heads/all-ukraine
 Compose path: compose.yaml
 ```
 
@@ -51,7 +51,7 @@ Compose path: compose.yaml
 
 ## Обновление и откат
 
-Для новой версии в Stack используйте действие обновления/повторного развёртывания с включённой загрузкой свежего образа (**Re-pull image / Pull latest image**, название зависит от версии Portainer). Одного restart контейнера недостаточно для загрузки нового latest.
+Для новой версии в Stack используйте действие обновления/повторного развёртывания с включённой загрузкой свежего образа (**Re-pull image / Pull latest image**, название зависит от версии Portainer). Одного restart контейнера недостаточно для загрузки нового образа.
 
 Для фиксации версии замените image на опубликованный `ghcr.io/kerber0ss/sumy-alarm-map:sha-<полный commit SHA>`, затем обновите Stack. Теги доступны в [Packages репозитория](https://github.com/Kerber0ss/sumy-alarm-map/pkgs/container/sumy-alarm-map).
 
