@@ -2,7 +2,7 @@
 !Dockerfile
 !.dockerignore
 !server.py
-!target_wire.py
+!neptun.py
 !sumy-regions.json
 !public/
 !public/**
