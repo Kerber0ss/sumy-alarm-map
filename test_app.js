@@ -106,3 +106,23 @@ run(`
 `);
 assert.ok(source.includes('5000 - (performance.now() - requestStarted)'), 'poll every 5 seconds including request time');
 console.log('Flight rendering checks passed: always-visible cones, zoom/spacing, ETA provenance, bearings, interpolation and reduced motion.');
+
+assert.equal(run("targetColor('drone')"), run("targetColor('shahed')"));
+assert.equal(run("targetColor('shahed-jet')"), run("targetColor('banderol')"));
+assert.notEqual(run("targetColor('missile')"), run("targetColor('ballistic')"));
+assert.notEqual(run("targetColor('airbomb')"), run("targetColor('ballistic')"));
+assert.ok(run("markerIcon({kind:'drone', heading:null}).html").includes('Курс невідомий'));
+assert.ok(run("markerIcon({kind:'drone', heading:0}).html").includes('Курс відомий'));
+assert.ok(run("markerIcon({kind:'drone', heading:null, displayHeading:90}).html").includes('Курс невідомий'), 'display rotation must not invent a course after zoom');
+run(`
+  const classes = new Map();
+  const wrapper = {classList:{toggle(name, on){classes.set(name,on);}}, title:''};
+  const rotation = {style:{},parentElement:wrapper};
+  const iconMarker = {flightKind:'drone',flightHeading:350,getElement(){return {querySelector(){return rotation;}};}};
+  updateTargetIcon(iconMarker, {kind:'drone',heading:null});
+  if (!classes.get('course-unknown')) throw new Error('Losing the course must show unknown-course ring');
+  updateTargetIcon(iconMarker, {kind:'drone',heading:10});
+  if (classes.get('course-unknown')) throw new Error('Receiving a course must remove unknown-course ring');
+  if (rotation.style.transform !== 'rotate(370deg)') throw new Error('Rotation must use the shortest arc');
+`);
+console.log('Target color and unknown-course transition checks passed.');

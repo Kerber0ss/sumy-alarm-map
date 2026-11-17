@@ -22,3 +22,8 @@
 .flight-rotation{display:block;width:100%;height:100%;fill:var(--flight-color);stroke:#263845;stroke-width:.45;stroke-linejoin:round;stroke-linecap:round;transform-origin:center;transition:transform 700ms ease-out}
 .flight-eta{font-size:10px;font-weight:650;color:#ffd572;text-align:center;white-space:nowrap;pointer-events:none;text-shadow:0 1px 2px #000,1px 0 2px #000,-1px 0 2px #000,0 -1px 2px #000}
 @media(prefers-reduced-motion:reduce){.flight-rotation{transition:none}}
+
+.flight-symbol{position:relative}
+.course-unknown:before{content:"";position:absolute;inset:-3px;border:1px dashed var(--flight-color);border-radius:50%;opacity:.75}
+.course-unknown-badge{display:none}
+.course-unknown .course-unknown-badge{display:grid;place-items:center;position:absolute;right:-6px;bottom:-5px;width:12px;height:12px;border-radius:50%;background:#17212b;color:var(--flight-color);border:1px solid currentColor;font:700 10px/1 system-ui}

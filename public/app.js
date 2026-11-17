@@ -73,6 +73,13 @@ function renderDistricts(fresh) {
   }
 }
 
+function targetColor(kind) {
+  return ({drone: "#72d1ff", shahed: "#72d1ff", "shahed-jet": "#ff6068",
+    banderol: "#ff6068", recon: "#ffda63", mig31k: "#ffda63",
+    missile: "#ff9b42", ballistic: "#ff454f", airbomb: "#ffda63",
+    fpv: "#fff9ec", unknown: "#bcc7d5"})[kind] || "#bcc7d5";
+}
+
 // Original, nose-up silhouettes: generic UAVs use a fixed-wing symbol, not a quadcopter.
 function markerIcon(target) {
   const shapes = {
@@ -86,11 +93,12 @@ function markerIcon(target) {
   const shape = ["drone", "shahed", "shahed-jet"].includes(kind) ? "wing"
     : ["missile", "ballistic", "airbomb"].includes(kind) ? "missile"
     : ["recon", "banderol", "mig31k"].includes(kind) ? "recon" : kind === "fpv" ? "fpv" : "unknown";
-  const color = shape === "wing" ? "#72d1ff" : "#fff9ec";
-  const heading = Number.isFinite(target.heading) ? target.heading : 0;
+  const color = targetColor(kind);
+  const hasCourse = Number.isFinite(target.heading);
+  const heading = target.displayHeading ?? (hasCourse ? target.heading : 0);
   const zoom = map?.getZoom?.() ?? 10;
   const size = zoom < 7 ? 20 : zoom < 9 ? 24 : 28;
-  return L.divIcon({className: "target-marker", iconSize: [size, size], iconAnchor: [size / 2, size / 2], popupAnchor: [0, -size / 2], html: `<div class="flight-symbol ${target.fading ? "target-fading" : ""}" style="--flight-color:${color}"><svg class="flight-rotation" viewBox="0 0 24 24" aria-hidden="true" style="transform:rotate(${heading}deg)">${shapes[shape]}</svg></div>`});
+  return L.divIcon({className: "target-marker", iconSize: [size, size], iconAnchor: [size / 2, size / 2], popupAnchor: [0, -size / 2], html: `<div class="flight-symbol ${target.fading ? "target-fading" : ""} ${hasCourse ? "" : "course-unknown"}" title="${hasCourse ? "Курс відомий" : "Курс невідомий"}" style="--flight-color:${color}"><svg class="flight-rotation" viewBox="0 0 24 24" aria-hidden="true" style="transform:rotate(${heading}deg)">${shapes[shape]}</svg><span class="course-unknown-badge" aria-hidden="true">?</span></div>`});
 }
 
 // Speeds are explicit visual estimates when the public source omits velocity.
@@ -219,8 +227,10 @@ function updateTargetIcon(marker, target) {
   if (rotation && marker.flightKind === target.kind) {
     rotation.style.transform = `rotate(${next}deg)`;
     rotation.parentElement.classList.toggle("target-fading", !!target.fading);
+    rotation.parentElement.classList.toggle("course-unknown", !Number.isFinite(target.heading));
+    rotation.parentElement.title = Number.isFinite(target.heading) ? "Курс відомий" : "Курс невідомий";
   } else {
-    marker.setIcon(markerIcon({...target, heading: next}));
+    marker.setIcon(markerIcon({...target, displayHeading: next}));
     marker.flightKind = target.kind;
   }
 }
@@ -378,7 +388,7 @@ async function start() {
     for (const target of visibleTargets()) {
       const marker = targetMarkers.get(target.id);
       if (marker) {
-        marker.setIcon(markerIcon({...target, heading: marker.flightHeading}));
+        marker.setIcon(markerIcon({...target, displayHeading: marker.flightHeading}));
       }
     }
     if (data) renderCourses(visibleTargets());
