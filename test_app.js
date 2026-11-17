@@ -56,3 +56,30 @@ assert.equal(run("targetMarkers.size"), 0, "expired data must remove all markers
 assert.equal(element("active-count").textContent, "—");
 assert.ok(element("districts").innerHTML.includes("Немає даних"));
 console.log("Map rendering checks passed: country coverage, filtering, courses, area-only reports, escaping, expiry.");
+
+const courses = [];
+context.courseItems = courses;
+run(`
+  courseLayer = {clearLayers() { courseItems.length = 0; }};
+  map = {getZoom: () => 10};
+  for (const method of ['polygon', 'polyline', 'circleMarker']) {
+    L[method] = (points, options) => ({addTo() { courseItems.push({method, points, options}); return this; }});
+  }
+  const originalMarker = L.marker;
+  L.marker = (point, options) => ({addTo() { courseItems.push({method: 'label', point, options}); return this; }});
+  renderCourses([{lat: 50, lon: 34, heading: 90, velocity: {speedKmh: 120}}]);
+`);
+assert.equal(courses.length, 12);
+assert.ok(courses[1].points[1][1] > 34, 'eastward course must extend east');
+assert.ok(courses[3].options.icon.html.includes('1 хв'));
+assert.ok(courses[11].options.icon.html.includes('5 хв'));
+run('renderCourses([{lat: 50, lon: 34, heading: 0}]);');
+assert.ok(courses[1].points[1][0] > 50, 'northward course must extend north');
+assert.ok(courses[3].options.icon.html.includes('2 км'));
+run('renderCourses([{lat: 50, lon: 34, heading: null}, {lat: 50, lon: 34, heading: 90, areaOnly: true}]);');
+assert.equal(courses.length, 0, 'unknown course and area-only reports have no projection');
+run('map.getZoom = () => 8; renderCourses([{lat: 50, lon: 34, heading: 270}]);');
+assert.equal(courses.length, 2, 'hide labels and ticks at country zoom');
+run('renderCourses([]);');
+assert.equal(courses.length, 0, 'expired or filtered courses are removed');
+console.log('Course checks passed: bearings, minute/distance labels, unknown course, zoom and cleanup.');

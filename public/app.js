@@ -12,7 +12,7 @@ const dateFormat = new Intl.DateTimeFormat("uk-UA", {timeZone: "Europe/Kyiv", da
 const shortDistrict = name => name.replace(" район", "");
 const course = heading => heading == null ? "Курс не вказаний" : `${directions[Math.round(heading / 45) % 8]} · ${Math.round(heading)}°`;
 
-let map, outline, districtGeo, markerLayer;
+let map, outline, districtGeo, markerLayer, courseLayer;
 let selectedRegion = "";
 const regionLayers = new Map();
 let data = null, receivedAt = 0, lastFreshKey = "", busy = false, tileFailures = 0;
@@ -70,15 +70,51 @@ function renderDistricts(fresh) {
   }
 }
 
+// Every silhouette is drawn nose-up; geographic headings rotate clockwise from north.
 function markerIcon(target) {
-  const icons = new Set(["ic_airbomb", "ic_ballistic", "ic_banderol", "ic_drone", "ic_missile", "ic_shahed", "ic_shahed_jet", "ic_shahed_jet_mesh", "ic_shahed_mesh"]);
-  const areaLevel = data.districts.find(d => d.id === target.districtId)?.level
-    ?? data.regions.find(r => r.id === target.regionId)?.level;
-  const fallback = areaLevel === "red" ? "ic_air_threat_combined_white" : "ic_shahed";
-  const icon = target.classification && icons.has(target.iconName)
-    ? `/icons/detected/${target.iconName}.svg` : `/icons/${fallback}.svg`;
-  // Original SVG points north at 0°. Missing heading keeps its base orientation, not a claimed course.
-  return L.divIcon({className: "target-marker", iconSize: [44, 44], iconAnchor: [22, 22], popupAnchor: [0, -24], html: `<div class="original-target ${target.fading ? "target-fading" : ""}"><img src="${icon}" alt="" width="44" height="44" style="transform:rotate(${target.heading ?? 0}deg)"></div>`});
+  const shapes = {
+    shahed: '<path d="M24 4 28 22 43 36 43 40 27 34 27 42 21 42 21 34 5 40 5 36 20 22Z"/><path class="target-detail" d="M24 13V33M18 39H30"/>',
+    drone: '<path d="M22 8H26L28 20 38 12 41 15 29 26 39 36 36 39 27 31 26 40H22L21 31 12 39 9 36 19 26 7 15 10 12 20 20Z"/><g fill="none"><ellipse cx="10" cy="12" rx="7" ry="3"/><ellipse cx="38" cy="12" rx="7" ry="3"/><ellipse cx="10" cy="38" rx="7" ry="3"/><ellipse cx="38" cy="38" rx="7" ry="3"/></g>',
+    missile: '<path d="M24 3Q30 10 28 27L36 37 28 35 28 43 20 43 20 35 12 37 20 27Q18 10 24 3Z"/><path class="target-detail" d="M21 16H27"/>',
+    recon: '<path d="M24 4 27 21 44 26 44 30 27 28 27 38 33 41 33 44 24 42 15 44 15 41 21 38 21 28 4 30 4 26 21 21Z"/>',
+    unknown: '<path d="m24 6 16 18-16 18L8 24Z"/><path class="target-detail" d="M20 19C20 13 30 14 28 20L24 25M24 30V32"/>'
+  };
+  const type = ({'shahed-jet': 'shahed', banderol: 'recon', fpv: 'drone', airbomb: 'missile', ballistic: 'missile', mig31k: 'recon'})[target.kind] || target.kind;
+  const heading = Number.isFinite(target.heading) ? target.heading : 0;
+  return L.divIcon({className: "target-marker", iconSize: [48, 48], iconAnchor: [24, 24], popupAnchor: [0, -24], html: `<div class="flight-target ${target.fading ? "target-fading" : ""}"><svg viewBox="0 0 48 48" aria-hidden="true" style="transform:rotate(${heading}deg)">${shapes[type] || shapes.unknown}</svg></div>`});
+}
+
+// Great-circle destination, so course and distance remain correct at every map zoom.
+function coursePoint(target, distanceKm, heading = target.heading) {
+  const rad = Math.PI / 180, arc = distanceKm / 6371;
+  const lat = target.lat * rad, lon = target.lon * rad, bearing = heading * rad;
+  const nextLat = Math.asin(Math.sin(lat) * Math.cos(arc) + Math.cos(lat) * Math.sin(arc) * Math.cos(bearing));
+  return [nextLat / rad, (lon + Math.atan2(Math.sin(bearing) * Math.sin(arc) * Math.cos(lat), Math.cos(arc) - Math.sin(lat) * Math.sin(nextLat))) / rad];
+}
+
+function renderCourses(targets) {
+  if (!courseLayer) return;
+  courseLayer.clearLayers();
+  for (const target of targets) {
+    if (target.areaOnly || !Number.isFinite(target.heading)) continue;
+    const speed = target.velocity?.speedKmh;
+    const timed = Number.isFinite(speed) && speed > 0;
+    const step = timed ? speed / 60 : 2;
+    const origin = [target.lat, target.lon];
+    // This fan illustrates a course, not a measured confidence interval.
+    const spread = target.presumptiveCourse ? 22 : 12;
+    const edge = [];
+    for (let angle = -spread; angle <= spread; angle += 2) edge.push(coursePoint(target, step * 5, target.heading + angle));
+    const style = {color: "#ffc247", interactive: false, weight: 1.5};
+    L.polygon([origin, ...edge], {...style, fillOpacity: .12, dashArray: "5 6", opacity: .65}).addTo(courseLayer);
+    L.polyline([origin, coursePoint(target, step * 5)], {...style, weight: 2, opacity: .9}).addTo(courseLayer);
+    if (map.getZoom() < 9) continue;
+    for (let i = 1; i <= 5; i++) {
+      const point = coursePoint(target, step * i);
+      L.circleMarker(point, {...style, radius: 3, color: "#392c12", fillColor: "#ffc247", fillOpacity: 1}).addTo(courseLayer);
+      L.marker(point, {interactive: false, keyboard: false, icon: L.divIcon({className: "course-label", iconSize: [64, 20], iconAnchor: [32, 27], html: `${timed ? i : i * step} ${timed ? "хв" : "км"}`})}).addTo(courseLayer);
+    }
+  }
 }
 
 function targetDetails(t) {
@@ -99,6 +135,7 @@ function targetDetails(t) {
 function renderTargets(fresh) {
   const targets = fresh ? data.targets.filter(t => !selectedRegion || t.regionId === selectedRegion) : [];
   $("target-count").textContent = fresh ? targets.length : "—";
+  renderCourses(targets);
   const present = new Set(targets.filter(t => !t.areaOnly).map(t => t.id));
   for (const [id, marker] of targetMarkers) {
     if (!present.has(id)) { markerLayer.removeLayer(marker); targetMarkers.delete(id); }
@@ -219,7 +256,11 @@ async function start() {
     }
     map.fitBounds((regionLayers.get(selectedRegion) || outline).getBounds(), {padding: [25, 75]});
   });
+  courseLayer = L.layerGroup().addTo(map);
   markerLayer = L.layerGroup().addTo(map);
+  map.on("zoomend", () => {
+    if (data) renderCourses(freshness().targets ? data.targets.filter(t => !selectedRegion || t.regionId === selectedRegion) : []);
+  });
   const fit = (bounds) => {
     map.closePopup();
     const mobile = window.innerWidth <= 580 && !document.body.classList.contains("map-only");

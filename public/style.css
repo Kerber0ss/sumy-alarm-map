@@ -17,3 +17,9 @@
 @media(max-width:580px){.map-top .map-title{display:none}#toggle-interface{padding:10px 12px}}
 
 .region-filter{padding:18px 20px 0}.region-filter label{display:block;color:var(--muted);font-size:11px;margin-bottom:8px}.region-filter select{width:100%;padding:10px;background:#131f2d;border:1px solid #30444d;border-radius:8px;color:var(--text);font:inherit}.region-filter select:focus-visible{outline:2px solid var(--cyan)}
+
+.flight-target{width:48px;height:48px;filter:drop-shadow(0 2px 3px #000b)}
+.flight-target svg{display:block;width:48px;height:48px;transform-origin:center;fill:#e8f8ff;stroke:#173747;stroke-width:1.5;stroke-linejoin:round;stroke-linecap:round}
+.flight-target .target-detail{fill:none;stroke:#4585a0;stroke-width:1.6}
+.target-marker:hover .flight-target{filter:drop-shadow(0 0 6px #80d8ff)}
+.course-label{color:#ffc247;font-size:12px;font-weight:800;text-align:center;white-space:nowrap;text-shadow:-1px -1px 2px #211b15,1px -1px 2px #211b15,-1px 1px 2px #211b15,1px 1px 2px #211b15;pointer-events:none}
