@@ -87,7 +87,7 @@ function markerIcon(target) {
     jet: '<g transform="scale(.75)"><path d="M16 2Q18 3 18 8L18 14 28 23 28 26 18 21 18 27 14 27 14 21 4 26 4 23 14 14 14 8Q14 3 16 2Z"/></g>',
     recon: '<path d="M12 2 13.5 10 23 13 23 15 13.5 14 13 20 17 21 17 23 12 22 7 23 7 21 11 20 10.5 14 1 15 1 13 10.5 10Z"/>',
     missile: '<path d="M12 1Q15 5 14 14L18 19 14 18 14 23 10 23 10 18 6 19 10 14Q9 5 12 1Z"/>',
-    fpv: '<path d="M10 7H14V17H10ZM5 4 19 20M19 4 5 20"/><path fill="none" d="M1 4H9M15 4H23M1 20H9M15 20H23"/>',
+    fpv: '<g transform="scale(.75)"><path d="M8 8 24 24M24 8 8 24" fill="none" stroke="#fff9ec" stroke-width="2.2"/><g fill="none" stroke="#fff9ec" stroke-width="1.7"><circle cx="7" cy="7" r="5"/><circle cx="25" cy="7" r="5"/><circle cx="7" cy="25" r="5"/><circle cx="25" cy="25" r="5"/></g><path d="M13 10H19L20 23H12Z"/><path d="m16 10 3 5h-6Z" fill="#72d1ff" stroke="none"/></g>',
     unknown: '<path d="M12 2 21 21 12 17 3 21Z"/>'
   };
   const kind = target.kind;
