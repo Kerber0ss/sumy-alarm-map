@@ -13,7 +13,7 @@ const shortDistrict = name => name.replace(" район", "");
 const course = heading => heading == null ? "Курс не вказаний" : `${directions[Math.round(heading / 45) % 8]} · ${Math.round(heading)}°`;
 
 let map, outline, districtGeo, markerLayer, courseLayer;
-let selectedRegion = "";
+let selectedRegion = "", selectedTargetId = null;
 const regionLayers = new Map();
 let data = null, receivedAt = 0, lastFreshKey = "", busy = false, tileFailures = 0;
 const districtLayers = new Map();
@@ -70,18 +70,16 @@ function renderDistricts(fresh) {
   }
 }
 
-// Every silhouette is drawn nose-up; geographic headings rotate clockwise from north.
 function markerIcon(target) {
-  const shapes = {
-    shahed: '<path d="M24 4 28 22 43 36 43 40 27 34 27 42 21 42 21 34 5 40 5 36 20 22Z"/><path class="target-detail" d="M24 13V33M18 39H30"/>',
-    drone: '<path d="M22 8H26L28 20 38 12 41 15 29 26 39 36 36 39 27 31 26 40H22L21 31 12 39 9 36 19 26 7 15 10 12 20 20Z"/><g fill="none"><ellipse cx="10" cy="12" rx="7" ry="3"/><ellipse cx="38" cy="12" rx="7" ry="3"/><ellipse cx="10" cy="38" rx="7" ry="3"/><ellipse cx="38" cy="38" rx="7" ry="3"/></g>',
-    missile: '<path d="M24 3Q30 10 28 27L36 37 28 35 28 43 20 43 20 35 12 37 20 27Q18 10 24 3Z"/><path class="target-detail" d="M21 16H27"/>',
-    recon: '<path d="M24 4 27 21 44 26 44 30 27 28 27 38 33 41 33 44 24 42 15 44 15 41 21 38 21 28 4 30 4 26 21 21Z"/>',
-    unknown: '<path d="m24 6 16 18-16 18L8 24Z"/><path class="target-detail" d="M20 19C20 13 30 14 28 20L24 25M24 30V32"/>'
-  };
-  const type = ({'shahed-jet': 'shahed', banderol: 'recon', fpv: 'drone', airbomb: 'missile', ballistic: 'missile', mig31k: 'recon'})[target.kind] || target.kind;
-  const heading = Number.isFinite(target.heading) ? target.heading : 0;
-  return L.divIcon({className: "target-marker", iconSize: [48, 48], iconAnchor: [24, 24], popupAnchor: [0, -24], html: `<div class="flight-target ${target.fading ? "target-fading" : ""}"><svg viewBox="0 0 48 48" aria-hidden="true" style="transform:rotate(${heading}deg)">${shapes[type] || shapes.unknown}</svg></div>`});
+  const icons = new Set(["ic_airbomb", "ic_ballistic", "ic_banderol", "ic_drone", "ic_missile", "ic_shahed", "ic_shahed_jet", "ic_shahed_jet_mesh", "ic_shahed_mesh"]);
+  const byKind = {shahed: "ic_shahed", "shahed-jet": "ic_shahed_jet", drone: "ic_drone", fpv: "ic_drone", recon: "ic_drone", missile: "ic_missile", ballistic: "ic_ballistic", airbomb: "ic_airbomb", banderol: "ic_banderol"};
+  const name = icons.has(target.iconName) ? target.iconName : byKind[target.kind];
+  const icon = name ? `/icons/detected/${name}.svg` : "/icons/ic_shahed.svg";
+  // NEPTUN's drone SVG points east after its internal rotation; other assets point north.
+  const heading = (Number.isFinite(target.heading) ? target.heading : 0) - (name === "ic_drone" ? 90 : 0);
+  const zoom = map?.getZoom?.() ?? 10;
+  const size = zoom < 7 ? 28 : zoom < 9 ? 34 : 40;
+  return L.divIcon({className: "target-marker", iconSize: [size, size], iconAnchor: [size / 2, size / 2], popupAnchor: [0, -size / 2], html: `<div style="width:${size}px;height:${size}px" class="original-target ${target.fading ? "target-fading" : ""}"><img src="${icon}" alt="" width="${size}" height="${size}" style="transform:rotate(${heading}deg)"></div>`});
 }
 
 // Great-circle destination, so course and distance remain correct at every map zoom.
@@ -95,26 +93,21 @@ function coursePoint(target, distanceKm, heading = target.heading) {
 function renderCourses(targets) {
   if (!courseLayer) return;
   courseLayer.clearLayers();
-  for (const target of targets) {
-    if (target.areaOnly || !Number.isFinite(target.heading)) continue;
-    const speed = target.velocity?.speedKmh;
-    const timed = Number.isFinite(speed) && speed > 0;
-    const step = timed ? speed / 60 : 2;
-    const origin = [target.lat, target.lon];
-    // This fan illustrates a course, not a measured confidence interval.
-    const spread = target.presumptiveCourse ? 22 : 12;
-    const edge = [];
-    for (let angle = -spread; angle <= spread; angle += 2) edge.push(coursePoint(target, step * 5, target.heading + angle));
-    const style = {color: "#ffc247", interactive: false, weight: 1.5};
-    L.polygon([origin, ...edge], {...style, fillOpacity: .12, dashArray: "5 6", opacity: .65}).addTo(courseLayer);
-    L.polyline([origin, coursePoint(target, step * 5)], {...style, weight: 2, opacity: .9}).addTo(courseLayer);
-    if (map.getZoom() < 9) continue;
-    for (let i = 1; i <= 5; i++) {
-      const point = coursePoint(target, step * i);
-      L.circleMarker(point, {...style, radius: 3, color: "#392c12", fillColor: "#ffc247", fillOpacity: 1}).addTo(courseLayer);
-      L.marker(point, {interactive: false, keyboard: false, icon: L.divIcon({className: "course-label", iconSize: [64, 20], iconAnchor: [32, 27], html: `${timed ? i : i * step} ${timed ? "хв" : "км"}`})}).addTo(courseLayer);
-    }
-  }
+  const target = targets.find(t => t.id === selectedTargetId && !t.areaOnly && Number.isFinite(t.heading));
+  if (!target) return;
+  // A short screen-sized course indicator, never a made-up distance or arrival time.
+  const origin = map.latLngToContainerPoint([target.lat, target.lon]);
+  const ahead = map.latLngToContainerPoint(coursePoint(target, 1));
+  const dx = ahead.x - origin.x, dy = ahead.y - origin.y;
+  const length = Math.hypot(dx, dy);
+  if (!length) return;
+  const at = (forward, side = 0) => map.containerPointToLatLng([
+    origin.x + (dx * forward - dy * side) / length,
+    origin.y + (dy * forward + dx * side) / length
+  ]);
+  const style = {color: "#e8dfb7", interactive: false, weight: 1.5, opacity: .85};
+  L.polyline([at(22), at(86)], {...style, dashArray: "5 6"}).addTo(courseLayer);
+  L.polyline([at(79, -4), at(86), at(79, 4)], style).addTo(courseLayer);
 }
 
 function targetDetails(t) {
@@ -149,6 +142,11 @@ function renderTargets(fresh) {
     if (!marker) {
       marker = L.marker([target.lat, target.lon], {icon: markerIcon(target), title: title, keyboard: true}).addTo(markerLayer).bindPopup(popup);
       targetMarkers.set(target.id, marker);
+      marker.on("popupopen", () => {
+        selectedTargetId = target.id;
+        renderCourses(freshness().targets ? data.targets.filter(t => !selectedRegion || t.regionId === selectedRegion) : []);
+      });
+      marker.on("popupclose", () => { selectedTargetId = null; courseLayer?.clearLayers(); });
     } else {
       marker.setLatLng([target.lat, target.lon]).setIcon(markerIcon(target)).setPopupContent(popup);
     }
@@ -259,7 +257,7 @@ async function start() {
   courseLayer = L.layerGroup().addTo(map);
   markerLayer = L.layerGroup().addTo(map);
   map.on("zoomend", () => {
-    if (data) renderCourses(freshness().targets ? data.targets.filter(t => !selectedRegion || t.regionId === selectedRegion) : []);
+    if (data) renderTargets(freshness().targets);
   });
   const fit = (bounds) => {
     map.closePopup();

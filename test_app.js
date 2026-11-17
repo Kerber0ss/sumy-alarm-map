@@ -14,7 +14,7 @@ const context = vm.createContext({
   L: {
     divIcon: options => options,
     marker: (position, options) => ({position, options,
-      addTo() { return this; }, bindPopup(popup) { this.popup = popup; return this; },
+      on() { return this; }, addTo() { return this; }, bindPopup(popup) { this.popup = popup; return this; },
       setLatLng(value) { this.position = value; return this; },
       setIcon(value) { this.options.icon = value; return this; },
       setPopupContent(value) { this.popup = value; return this; }
@@ -61,25 +61,22 @@ const courses = [];
 context.courseItems = courses;
 run(`
   courseLayer = {clearLayers() { courseItems.length = 0; }};
-  map = {getZoom: () => 10};
-  for (const method of ['polygon', 'polyline', 'circleMarker']) {
-    L[method] = (points, options) => ({addTo() { courseItems.push({method, points, options}); return this; }});
-  }
-  const originalMarker = L.marker;
-  L.marker = (point, options) => ({addTo() { courseItems.push({method: 'label', point, options}); return this; }});
-  renderCourses([{lat: 50, lon: 34, heading: 90, velocity: {speedKmh: 120}}]);
+  map = {
+    latLngToContainerPoint: ([lat, lon]) => ({x: lon * 100, y: -lat * 100}),
+    containerPointToLatLng: ([x, y]) => [-y / 100, x / 100]
+  };
+  L.polyline = (points, options) => ({addTo() { courseItems.push({points, options}); return this; }});
+  selectedTargetId = null;
+  renderCourses([{id: 'one', lat: 50, lon: 34, heading: 90}]);
 `);
-assert.equal(courses.length, 12);
-assert.ok(courses[1].points[1][1] > 34, 'eastward course must extend east');
-assert.ok(courses[3].options.icon.html.includes('1 хв'));
-assert.ok(courses[11].options.icon.html.includes('5 хв'));
-run('renderCourses([{lat: 50, lon: 34, heading: 0}]);');
-assert.ok(courses[1].points[1][0] > 50, 'northward course must extend north');
-assert.ok(courses[3].options.icon.html.includes('2 км'));
-run('renderCourses([{lat: 50, lon: 34, heading: null}, {lat: 50, lon: 34, heading: 90, areaOnly: true}]);');
-assert.equal(courses.length, 0, 'unknown course and area-only reports have no projection');
-run('map.getZoom = () => 8; renderCourses([{lat: 50, lon: 34, heading: 270}]);');
-assert.equal(courses.length, 2, 'hide labels and ticks at country zoom');
-run('renderCourses([]);');
-assert.equal(courses.length, 0, 'expired or filtered courses are removed');
-console.log('Course checks passed: bearings, minute/distance labels, unknown course, zoom and cleanup.');
+assert.equal(courses.length, 0, 'unselected targets never clutter the map with lines');
+run("selectedTargetId = 'one'; renderCourses([{id: 'one', lat: 50, lon: 34, heading: 90}]);");
+assert.equal(courses.length, 2);
+assert.ok(courses[0].points[1][1] > courses[0].points[0][1], 'course points east');
+run("renderCourses([{id: 'one', lat: 50, lon: 34, heading: null}]);");
+assert.equal(courses.length, 0);
+run("renderCourses([]);");
+assert.equal(courses.length, 0);
+assert.ok(run("markerIcon({kind:'shahed', heading:180}).html").includes('/icons/detected/ic_shahed.svg'));
+assert.ok(run("markerIcon({kind:'drone', heading:90}).html").includes('rotate(0deg)'));
+console.log('NEPTUN icons and selected-only course checks passed.');
