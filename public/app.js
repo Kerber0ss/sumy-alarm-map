@@ -83,14 +83,15 @@ function targetColor(kind) {
 // Original, nose-up silhouettes: generic UAVs use a fixed-wing symbol, not a quadcopter.
 function markerIcon(target) {
   const shapes = {
-    wing: '<path d="M12 2 14 11 22 19 22 21 13 18 12 22 11 18 2 21 2 19 10 11Z"/>',
+    wing: '<g transform="scale(.75)"><path d="M16 2C17 2 17.5 4 18 7L19.5 15 29 26 29 28 19 24 18.5 29 13.5 29 13 24 3 28 3 26 12.5 15 14 7C14.5 4 15 2 16 2Z"/><path d="M16 8V24M13 26H19" fill="none" stroke="#327798" stroke-width=".9"/></g>',
+    jet: '<g transform="scale(.75)"><path d="M16 2Q18 3 18 8L18 14 28 23 28 26 18 21 18 27 14 27 14 21 4 26 4 23 14 14 14 8Q14 3 16 2Z"/></g>',
     recon: '<path d="M12 2 13.5 10 23 13 23 15 13.5 14 13 20 17 21 17 23 12 22 7 23 7 21 11 20 10.5 14 1 15 1 13 10.5 10Z"/>',
     missile: '<path d="M12 1Q15 5 14 14L18 19 14 18 14 23 10 23 10 18 6 19 10 14Q9 5 12 1Z"/>',
     fpv: '<path d="M10 7H14V17H10ZM5 4 19 20M19 4 5 20"/><path fill="none" d="M1 4H9M15 4H23M1 20H9M15 20H23"/>',
     unknown: '<path d="M12 2 21 21 12 17 3 21Z"/>'
   };
   const kind = target.kind;
-  const shape = ["drone", "shahed", "shahed-jet"].includes(kind) ? "wing"
+  const shape = kind === "shahed-jet" ? "jet" : ["drone", "shahed"].includes(kind) ? "wing"
     : ["missile", "ballistic", "airbomb"].includes(kind) ? "missile"
     : ["recon", "banderol", "mig31k"].includes(kind) ? "recon" : kind === "fpv" ? "fpv" : "unknown";
   const color = targetColor(kind);
