@@ -10,11 +10,14 @@ const element = id => {
 const removed = [];
 const context = vm.createContext({
   Intl, Map, Set, performance,
+  window: {matchMedia: () => ({matches: false})},
+  requestAnimationFrame: () => 1,
   document: {getElementById: element},
   L: {
     divIcon: options => options,
     marker: (position, options) => ({position, options,
       on() { return this; }, addTo() { return this; }, bindPopup(popup) { this.popup = popup; return this; },
+      getLatLng() { return {lat: this.position[0], lng: this.position[1]}; },
       setLatLng(value) { this.position = value; return this; },
       setIcon(value) { this.options.icon = value; return this; },
       setPopupContent(value) { this.popup = value; return this; }
@@ -62,21 +65,44 @@ context.courseItems = courses;
 run(`
   courseLayer = {clearLayers() { courseItems.length = 0; }};
   map = {
-    latLngToContainerPoint: ([lat, lon]) => ({x: lon * 100, y: -lat * 100}),
-    containerPointToLatLng: ([x, y]) => [-y / 100, x / 100]
+    getZoom: () => 8,
+    latLngToContainerPoint: ([lat, lon]) => ({x: lon * 1000, y: -lat * 1000})
   };
-  L.polyline = (points, options) => ({addTo() { courseItems.push({points, options}); return this; }});
-  selectedTargetId = null;
-  renderCourses([{id: 'one', lat: 50, lon: 34, heading: 90}]);
+  for (const method of ['polyline', 'polygon', 'circleMarker']) {
+    L[method] = (points, options) => ({addTo() { courseItems.push({method, points, options}); return this; }});
+  }
+  L.marker = (point, options) => ({addTo() { courseItems.push({method: 'label', point, options}); return this; }});
+  renderCourses([{id: 'one', kind: 'drone', lat: 50, lon: 34, heading: 90}]);
 `);
-assert.equal(courses.length, 0, 'unselected targets never clutter the map with lines');
-run("selectedTargetId = 'one'; renderCourses([{id: 'one', lat: 50, lon: 34, heading: 90}]);");
-assert.equal(courses.length, 2);
-assert.ok(courses[0].points[1][1] > courses[0].points[0][1], 'course points east');
-run("renderCourses([{id: 'one', lat: 50, lon: 34, heading: null}]);");
-assert.equal(courses.length, 0);
+assert.equal(courses.length, 4, 'all targets have a cone and centreline without selecting');
+assert.equal(courses[0].method, 'polygon');
+assert.ok(courses[0].options.fillOpacity < .1, 'cone stays translucent');
+assert.ok(courses[3].points.at(-1)[1] > 34, 'eastward course extends east');
+run("map.getZoom = () => 11; renderCourses([{id: 'one', kind: 'drone', lat: 50, lon: 34, heading: 0}]);");
+assert.ok(courses.some(c => c.method === 'label' && c.options.icon.html.includes('≈')), 'estimated times are explicit');
+assert.ok(courses.filter(c => c.method === 'label').length < 5, 'screen spacing hides crowded labels');
+run("renderCourses([{id: 'one', kind: 'drone', lat: 50, lon: 34, heading: 0, velocity: {speedKmh: 600}}]);");
+assert.ok(courses.some(c => c.method === 'label' && !c.options.icon.html.includes('≈')), 'reported speed has no estimate prefix');
+run("renderCourses([{lat: 50, lon: 34, heading: null}, {lat: 50, lon: 34, heading: 90, areaOnly: true}]);");
+assert.equal(courses.length, 0, 'no fabricated course for missing headings or area-only reports');
 run("renderCourses([]);");
-assert.equal(courses.length, 0);
-assert.ok(run("markerIcon({kind:'shahed', heading:180}).html").includes('/icons/detected/ic_shahed.svg'));
-assert.ok(run("markerIcon({kind:'drone', heading:90}).html").includes('rotate(0deg)'));
-console.log('NEPTUN icons and selected-only course checks passed.');
+assert.equal(courses.length, 0, 'expired courses are cleared');
+assert.ok(run("markerIcon({kind:'drone', heading:90}).html").includes('rotate(90deg)'));
+assert.ok(!run("markerIcon({kind:'drone', heading:90}).html").includes('ic_drone'), 'generic UAV uses a fixed-wing symbol');
+assert.equal(run("flightSpeed({kind:'drone'}).kmh"), 170);
+assert.equal(run("flightSpeed({kind:'unknown'}).kmh"), null);
+assert.equal(run("flightSpeed({velocity:{speedKmh: 250}}).estimated"), false);
+assert.equal(run("motionPosition({from:[50,30],to:[52,34],start:1000}, 3400)[0]"), 51);
+assert.equal(run("motionPosition({from:[50,30],to:[52,34],start:1000}, 9000)[0]"), 52, 'motion never extrapolates past source position');
+run(`
+  const movingMarker = {position:[50,30], getLatLng() {return {lat:this.position[0],lng:this.position[1]};}, setLatLng(p) {this.position=p;}};
+  moveTarget(movingMarker, {id:'moving',lat:51,lon:31});
+  const initialMotion = targetMotion.get('moving');
+  moveTarget(movingMarker, {id:'moving',lat:51,lon:31});
+  if (initialMotion !== targetMotion.get('moving')) throw new Error('Identical snapshots must not restart movement');
+  window.matchMedia = () => ({matches:true});
+  moveTarget(movingMarker, {id:'moving',lat:52,lon:32});
+  if (movingMarker.position[0] !== 52 || targetMotion.has('moving')) throw new Error('Reduced motion must snap to new position');
+`);
+assert.ok(source.includes('5000 - (performance.now() - requestStarted)'), 'poll every 5 seconds including request time');
+console.log('Flight rendering checks passed: always-visible cones, zoom/spacing, ETA provenance, bearings, interpolation and reduced motion.');

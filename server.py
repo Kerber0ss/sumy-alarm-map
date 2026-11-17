@@ -180,7 +180,7 @@ def make_state(now):
 def get_state():
     with LOCK:
         now = time.time()
-        due = [name for name in ENDPOINTS if now - CACHE.get(name, {}).get("attemptAt", 0) >= 10]
+        due = [name for name in ENDPOINTS if now - CACHE.get(name, {}).get("attemptAt", 0) >= 5]
         pending = {name: POOL.submit(fetch_source, name) for name in due}
         for name, future in pending.items():
             entry = CACHE.setdefault(name, {})

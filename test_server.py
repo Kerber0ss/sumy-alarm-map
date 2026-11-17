@@ -148,6 +148,17 @@ class UkraineMapTests(unittest.TestCase):
             server.get_state()
         fetch.assert_not_called()
 
+    def test_source_refreshes_at_five_seconds(self):
+        for entry in server.CACHE.values():
+            entry["attemptAt"] = self.now
+        with patch.object(server.time, "time", return_value=self.now + 4.9), patch.object(server, "fetch_source") as fetch:
+            server.get_state()
+            fetch.assert_not_called()
+        snapshots = {name: copy.deepcopy(entry["data"]) for name, entry in server.CACHE.items()}
+        with patch.object(server.time, "time", return_value=self.now + 5), patch.object(server, "fetch_source", side_effect=lambda name: snapshots[name]) as fetch:
+            server.get_state()
+            self.assertEqual(fetch.call_count, 2)
+
     def test_fetch_uses_documented_neptun_endpoints(self):
         for source, raw in [("alerts", {"raions": [], "oblasts": []}),
                             ("targets", {"serverTime": datetime.now(timezone.utc).isoformat(), "threats": []})]:

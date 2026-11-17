@@ -13,7 +13,10 @@ const shortDistrict = name => name.replace(" район", "");
 const course = heading => heading == null ? "Курс не вказаний" : `${directions[Math.round(heading / 45) % 8]} · ${Math.round(heading)}°`;
 
 let map, outline, districtGeo, markerLayer, courseLayer;
-let selectedRegion = "", selectedTargetId = null;
+let selectedRegion = "";
+const targetMotion = new Map();
+let animationFrame = 0, lastCourseFrame = 0, refreshTimer = 0;
+const reducedMotion = () => window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
 const regionLayers = new Map();
 let data = null, receivedAt = 0, lastFreshKey = "", busy = false, tileFailures = 0;
 const districtLayers = new Map();
@@ -70,16 +73,32 @@ function renderDistricts(fresh) {
   }
 }
 
+// Original, nose-up silhouettes: generic UAVs use a fixed-wing symbol, not a quadcopter.
 function markerIcon(target) {
-  const icons = new Set(["ic_airbomb", "ic_ballistic", "ic_banderol", "ic_drone", "ic_missile", "ic_shahed", "ic_shahed_jet", "ic_shahed_jet_mesh", "ic_shahed_mesh"]);
-  const byKind = {shahed: "ic_shahed", "shahed-jet": "ic_shahed_jet", drone: "ic_drone", fpv: "ic_drone", recon: "ic_drone", missile: "ic_missile", ballistic: "ic_ballistic", airbomb: "ic_airbomb", banderol: "ic_banderol"};
-  const name = icons.has(target.iconName) ? target.iconName : byKind[target.kind];
-  const icon = name ? `/icons/detected/${name}.svg` : "/icons/ic_shahed.svg";
-  // NEPTUN's drone SVG points east after its internal rotation; other assets point north.
-  const heading = (Number.isFinite(target.heading) ? target.heading : 0) - (name === "ic_drone" ? 90 : 0);
+  const shapes = {
+    wing: '<path d="M12 2 14 11 22 19 22 21 13 18 12 22 11 18 2 21 2 19 10 11Z"/>',
+    recon: '<path d="M12 2 13.5 10 23 13 23 15 13.5 14 13 20 17 21 17 23 12 22 7 23 7 21 11 20 10.5 14 1 15 1 13 10.5 10Z"/>',
+    missile: '<path d="M12 1Q15 5 14 14L18 19 14 18 14 23 10 23 10 18 6 19 10 14Q9 5 12 1Z"/>',
+    fpv: '<path d="M10 7H14V17H10ZM5 4 19 20M19 4 5 20"/><path fill="none" d="M1 4H9M15 4H23M1 20H9M15 20H23"/>',
+    unknown: '<path d="M12 2 21 21 12 17 3 21Z"/>'
+  };
+  const kind = target.kind;
+  const shape = ["drone", "shahed", "shahed-jet"].includes(kind) ? "wing"
+    : ["missile", "ballistic", "airbomb"].includes(kind) ? "missile"
+    : ["recon", "banderol", "mig31k"].includes(kind) ? "recon" : kind === "fpv" ? "fpv" : "unknown";
+  const color = shape === "wing" ? "#72d1ff" : "#fff9ec";
+  const heading = Number.isFinite(target.heading) ? target.heading : 0;
   const zoom = map?.getZoom?.() ?? 10;
-  const size = zoom < 7 ? 28 : zoom < 9 ? 34 : 40;
-  return L.divIcon({className: "target-marker", iconSize: [size, size], iconAnchor: [size / 2, size / 2], popupAnchor: [0, -size / 2], html: `<div style="width:${size}px;height:${size}px" class="original-target ${target.fading ? "target-fading" : ""}"><img src="${icon}" alt="" width="${size}" height="${size}" style="transform:rotate(${heading}deg)"></div>`});
+  const size = zoom < 7 ? 20 : zoom < 9 ? 24 : 28;
+  return L.divIcon({className: "target-marker", iconSize: [size, size], iconAnchor: [size / 2, size / 2], popupAnchor: [0, -size / 2], html: `<div class="flight-symbol ${target.fading ? "target-fading" : ""}" style="--flight-color:${color}"><svg class="flight-rotation" viewBox="0 0 24 24" aria-hidden="true" style="transform:rotate(${heading}deg)">${shapes[shape]}</svg></div>`});
+}
+
+// Speeds are explicit visual estimates when the public source omits velocity.
+function flightSpeed(target) {
+  const reported = target.velocity?.speedKmh;
+  if (Number.isFinite(reported) && reported > 0 && reported <= 10000) return {kmh: reported, estimated: false};
+  const typical = {drone: 170, shahed: 170, "shahed-jet": 450, banderol: 540, missile: 750, ballistic: 3000};
+  return {kmh: typical[target.kind] || null, estimated: true};
 }
 
 // Great-circle destination, so course and distance remain correct at every map zoom.
@@ -90,24 +109,120 @@ function coursePoint(target, distanceKm, heading = target.heading) {
   return [nextLat / rad, (lon + Math.atan2(Math.sin(bearing) * Math.sin(arc) * Math.cos(lat), Math.cos(arc) - Math.sin(lat) * Math.sin(nextLat))) / rad];
 }
 
+function courseGeometry(target, minutes, scale = 1) {
+  const speed = flightSpeed(target).kmh;
+  const steps = Math.max(6, Math.round(24 * scale)), dt = minutes * scale / steps;
+  let middle = [target.lat, target.lon], left = middle, right = middle;
+  const line = [middle], leftEdge = [], rightEdge = [];
+  for (let i = 1; i <= steps; i++) {
+    const time = (i - .5) * dt;
+    const width = 6 + 24 * Math.min(1, time / minutes);
+    const distance = speed * dt / 60;
+    const advance = (point, bearing) => coursePoint({lat: point[0], lon: point[1]}, distance, bearing);
+    middle = advance(middle, target.heading);
+    left = advance(left, target.heading - width);
+    right = advance(right, target.heading + width);
+    line.push(middle); leftEdge.push(left); rightEdge.push(right);
+  }
+  return {line, polygon: [[target.lat, target.lon], ...leftEdge, ...rightEdge.reverse()]};
+}
+
+function visibleTargets() {
+  return data && freshness().targets ? data.targets.filter(t => !selectedRegion || t.regionId === selectedRegion) : [];
+}
+
 function renderCourses(targets) {
   if (!courseLayer) return;
   courseLayer.clearLayers();
-  const target = targets.find(t => t.id === selectedTargetId && !t.areaOnly && Number.isFinite(t.heading));
-  if (!target) return;
-  // A short screen-sized course indicator, never a made-up distance or arrival time.
-  const origin = map.latLngToContainerPoint([target.lat, target.lon]);
-  const ahead = map.latLngToContainerPoint(coursePoint(target, 1));
-  const dx = ahead.x - origin.x, dy = ahead.y - origin.y;
-  const length = Math.hypot(dx, dy);
-  if (!length) return;
-  const at = (forward, side = 0) => map.containerPointToLatLng([
-    origin.x + (dx * forward - dy * side) / length,
-    origin.y + (dy * forward + dx * side) / length
-  ]);
-  const style = {color: "#e8dfb7", interactive: false, weight: 1.5, opacity: .85};
-  L.polyline([at(22), at(86)], {...style, dashArray: "5 6"}).addTo(courseLayer);
-  L.polyline([at(79, -4), at(86), at(79, 4)], style).addTo(courseLayer);
+  const occupied = [];
+  for (const sample of targets) {
+    if (sample.areaOnly || !Number.isFinite(sample.heading)) continue;
+    const marker = targetMarkers.get(sample.id);
+    const position = marker?.getLatLng();
+    const target = position ? {...sample, lat: position.lat, lon: position.lng} : sample;
+    const speed = flightSpeed(target);
+    const color = speed.kmh >= 600 ? "#ff7954" : "#ffc247";
+    const style = {color, interactive: false, weight: 1, opacity: .4};
+    if (!speed.kmh) {
+      // Unknown type/speed: show direction only, without invented ETA.
+      L.polyline([[target.lat, target.lon], coursePoint(target, 5)], {...style, opacity: .5}).addTo(courseLayer);
+      continue;
+    }
+    const minutes = target.kind === "ballistic" ? 2 : 5;
+    const full = courseGeometry(target, minutes);
+    for (const [scale, opacity] of [[1, .055], [.66, .04], [.33, .035]]) {
+      L.polygon(scale === 1 ? full.polygon : courseGeometry(target, minutes, scale).polygon,
+        {...style, stroke: scale === 1, dashArray: "4 5", fillOpacity: opacity}).addTo(courseLayer);
+    }
+    L.polyline(full.line, {...style, opacity: .55, weight: 1.2}).addTo(courseLayer);
+    if (map.getZoom() < 10) continue;
+    const origin = map.latLngToContainerPoint([target.lat, target.lon]);
+    let last = origin;
+    for (let minute = 1; minute <= minutes; minute++) {
+      const point = coursePoint(target, speed.kmh * minute / 60);
+      const pixel = map.latLngToContainerPoint(point);
+      // Space by actual screen distance, and avoid labels from neighbouring targets.
+      if (Math.hypot(pixel.x - last.x, pixel.y - last.y) < 42) continue;
+      last = pixel;
+      if (occupied.some(p => Math.abs(p.x - pixel.x) < 48 && Math.abs(p.y - pixel.y) < 24)) continue;
+      occupied.push(pixel);
+      L.circleMarker(point, {...style, radius: 2, weight: .8, color: "#382712", fillColor: color, fillOpacity: .9, opacity: .9}).addTo(courseLayer);
+      L.marker(point, {interactive: false, keyboard: false, icon: L.divIcon({className: "flight-eta", iconSize: [48, 18], iconAnchor: [24, 23], html: `${speed.estimated ? "≈" : ""}${minute} хв`})}).addTo(courseLayer);
+    }
+  }
+}
+
+function motionPosition(motion, now) {
+  const t = Math.min(1, Math.max(0, (now - motion.start) / 4800));
+  return [motion.from[0] + (motion.to[0] - motion.from[0]) * t,
+    motion.from[1] + (motion.to[1] - motion.from[1]) * t];
+}
+
+function animateTargets(now) {
+  animationFrame = 0;
+  if (document.hidden) return;
+  let active = false;
+  for (const [id, motion] of targetMotion) {
+    const marker = targetMarkers.get(id);
+    if (!marker) { targetMotion.delete(id); continue; }
+    marker.setLatLng(motionPosition(motion, now));
+    if (now - motion.start < 4800) active = true;
+    else targetMotion.delete(id);
+  }
+  if (!active || now - lastCourseFrame > 250) {
+    lastCourseFrame = now;
+    renderCourses(visibleTargets());
+  }
+  if (active) animationFrame = requestAnimationFrame(animateTargets);
+}
+
+function moveTarget(marker, target) {
+  const previous = marker.getLatLng();
+  const to = [target.lat, target.lon];
+  const pending = targetMotion.get(target.id);
+  if (pending?.to[0] === to[0] && pending?.to[1] === to[1]) return;
+  if (previous.lat === to[0] && previous.lng === to[1]) return;
+  if (reducedMotion() || document.hidden) {
+    targetMotion.delete(target.id);
+    marker.setLatLng(to);
+    return;
+  }
+  targetMotion.set(target.id, {from: [previous.lat, previous.lng], to, start: performance.now()});
+  if (!animationFrame) animationFrame = requestAnimationFrame(animateTargets);
+}
+
+function updateTargetIcon(marker, target) {
+  const rotation = marker.getElement?.()?.querySelector(".flight-rotation");
+  const old = marker.flightHeading ?? target.heading ?? 0;
+  const next = Number.isFinite(target.heading) ? old + (((target.heading - old) % 360 + 540) % 360) - 180 : old;
+  marker.flightHeading = next;
+  if (rotation && marker.flightKind === target.kind) {
+    rotation.style.transform = `rotate(${next}deg)`;
+    rotation.parentElement.classList.toggle("target-fading", !!target.fading);
+  } else {
+    marker.setIcon(markerIcon({...target, heading: next}));
+    marker.flightKind = target.kind;
+  }
 }
 
 function targetDetails(t) {
@@ -121,6 +236,8 @@ function targetDetails(t) {
   if (Number.isFinite(t.sourceCount)) notes.push(`Джерел: ${t.sourceCount}`);
   if (!t.areaOnly && Number.isFinite(t.uncertaintyKm)) notes.push(`Невизначеність позиції: ${t.uncertaintyKm} км`);
   if (!t.areaOnly && Number.isFinite(t.velocity?.speedKmh)) notes.push(`Швидкість: ${t.velocity.speedKmh} км/год`);
+  const speed = flightSpeed(t);
+  if (!t.areaOnly && speed.kmh && speed.estimated) notes.push(`Час на лінії ≈ за типовою швидкістю ${speed.kmh} км/год, не вимірювання`);
   if (t.updatedAt && Number.isFinite(Date.parse(t.updatedAt))) notes.push(`Оновлено ${dateFormat.format(new Date(t.updatedAt))}`);
   return notes.map(escapeHTML).join("<br>");
 }
@@ -128,10 +245,9 @@ function targetDetails(t) {
 function renderTargets(fresh) {
   const targets = fresh ? data.targets.filter(t => !selectedRegion || t.regionId === selectedRegion) : [];
   $("target-count").textContent = fresh ? targets.length : "—";
-  renderCourses(targets);
   const present = new Set(targets.filter(t => !t.areaOnly).map(t => t.id));
   for (const [id, marker] of targetMarkers) {
-    if (!present.has(id)) { markerLayer.removeLayer(marker); targetMarkers.delete(id); }
+    if (!present.has(id)) { markerLayer.removeLayer(marker); targetMarkers.delete(id); targetMotion.delete(id); }
   }
   for (const target of targets) {
     if (target.areaOnly) continue;
@@ -142,17 +258,17 @@ function renderTargets(fresh) {
     if (!marker) {
       marker = L.marker([target.lat, target.lon], {icon: markerIcon(target), title: title, keyboard: true}).addTo(markerLayer).bindPopup(popup);
       targetMarkers.set(target.id, marker);
-      marker.on("popupopen", () => {
-        selectedTargetId = target.id;
-        renderCourses(freshness().targets ? data.targets.filter(t => !selectedRegion || t.regionId === selectedRegion) : []);
-      });
-      marker.on("popupclose", () => { selectedTargetId = null; courseLayer?.clearLayers(); });
+      marker.flightKind = target.kind;
+      marker.flightHeading = target.heading ?? 0;
     } else {
-      marker.setLatLng([target.lat, target.lon]).setIcon(markerIcon(target)).setPopupContent(popup);
+      moveTarget(marker, target);
+      updateTargetIcon(marker, target);
+      marker.setPopupContent(popup);
     }
   }
+  renderCourses(targets);
   if (!fresh) {
-    $("targets").innerHTML = '<div class="empty-state">Немає свіжих даних про цілі<small>Застарілі позначки приховано. Повторюємо запит кожні 10 секунд.</small></div>';
+    $("targets").innerHTML = '<div class="empty-state">Немає свіжих даних про цілі<small>Застарілі позначки приховано. Повторюємо запит кожні 5 секунд.</small></div>';
   } else if (!targets.length) {
     $("targets").innerHTML = '<div class="empty-state">У джерелі немає позначок для обраної території<small>Це не означає відсутності загроз. Орієнтуйтеся на офіційні тривоги.</small></div>';
   } else {
@@ -184,8 +300,9 @@ function updateStatus() {
 }
 
 async function refresh() {
-  if (busy) return;
+  if (busy || document.hidden) return;
   busy = true;
+  const requestStarted = performance.now();
   try {
     const response = await fetch("/api/state", {cache: "no-store", signal: AbortSignal.timeout(18000)});
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -203,14 +320,15 @@ async function refresh() {
       $("connection-dot").className = "status-dot failed";
       $("connection-label").textContent = "Немає зв’язку з сервером";
       $("source-warning").hidden = false;
-      $("source-warning").textContent = "Не вдалося отримати дані. Наступна спроба через 10 секунд.";
+      $("source-warning").textContent = "Не вдалося отримати дані. Наступна спроба через 5 секунд.";
       $("districts").textContent = "Дані тривог недоступні";
       $("targets").textContent = "Дані цілей недоступні";
     }
     console.warn("Refresh failed:", error.message);
   } finally {
     busy = false;
-    window.setTimeout(refresh, 10000);
+    window.clearTimeout(refreshTimer);
+    refreshTimer = window.setTimeout(refresh, Math.max(0, 5000 - (performance.now() - requestStarted)));
   }
 }
 
@@ -257,7 +375,13 @@ async function start() {
   courseLayer = L.layerGroup().addTo(map);
   markerLayer = L.layerGroup().addTo(map);
   map.on("zoomend", () => {
-    if (data) renderTargets(freshness().targets);
+    for (const target of visibleTargets()) {
+      const marker = targetMarkers.get(target.id);
+      if (marker) {
+        marker.setIcon(markerIcon({...target, heading: marker.flightHeading}));
+      }
+    }
+    if (data) renderCourses(visibleTargets());
   });
   const fit = (bounds) => {
     map.closePopup();
@@ -319,6 +443,16 @@ async function start() {
     if (window.innerWidth <= 580) $("map").scrollIntoView({behavior: "smooth", block: "start"});
   });
   window.setInterval(updateStatus, 1000);
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) {
+      cancelAnimationFrame(animationFrame); animationFrame = 0;
+    } else {
+      for (const [id, motion] of targetMotion) targetMarkers.get(id)?.setLatLng(motion.to);
+      targetMotion.clear();
+      window.clearTimeout(refreshTimer);
+      void refresh();
+    }
+  });
   void refresh();
 }
 
